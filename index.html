@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>賓果 1-99 預測器（衰減權重 + 抽樣 Top10）</title>
+<style>
+body{background:#0f172a;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial;margin:0;padding:16px;}
+.card{background:#111827cc;padding:14px;border-radius:16px;margin-bottom:12px;box-shadow:0 10px 25px rgba(15,23,42,.6);}
+.btn{padding:8px 12px;border-radius:999px;border:0;background:linear-gradient(135deg,#22d3ee,#60a5fa);color:#020617;font-weight:700;cursor:pointer;}
+.btn.sec{background:#020617;color:#e5e7eb;border:1px solid rgba(148,163,184,.25);}
+input,textarea,select{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(148,163,184,.25);background:#020617;color:#e5e7eb;box-sizing:border-box;}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:4px;}
+.divider{border-top:1px dashed rgba(148,163,184,.4);margin:2px 0;}
+.mono{white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;}
+label.switch{display:inline-block;font-size:13px;vertical-align:middle;margin:0;padding:0;}
+label.switch input{margin-right:4px;vertical-align:middle;}
+#strictWrap{display:inline-block;font-size:13px;margin:0;padding:0;}
+#strictWrap input{margin-right:3px;vertical-align:middle;}
+.split2{display:flex;gap:8px;}
+.split2>div{flex:1;display:flex;flex-direction:column;}
+#singleTop .chip,#toplist .chip{margin:1px 0;}
+.chip{background:#1e293b;border-radius:12px;padding:6px 8px;font-size:13px;border:1px solid rgba(148,163,184,.35);box-shadow:0 4px 10px rgba(15,23,42,.8);display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.chip span.label{color:#e5e7eb;}
+.chip span.value{font-weight:600;}
+.chip.rankTop{border-color:#38bdf8;box-shadow:0 0 0 1px rgba(56,189,248,.4),0 10px 25px rgba(15,23,42,.9);background:radial-gradient(circle at top,#0ea5e944,#020617);}
+.chip.rankTop span.value{color:#7dd3fc;}
+.hit-table-wrapper{max-height:260px;overflow:auto;border-radius:10px;border:1px solid rgba(148,163,184,.4);background:#020617;}
+.hit-table{width:100%;border-collapse:collapse;font-size:12px;min-width:560px;}
+.hit-table thead{position:sticky;top:0;background:#020617;z-index:1;}
+.hit-table th,.hit-table td{padding:6px 8px;text-align:left;border-bottom:1px solid rgba(30,64,175,.5);}
+.hit-table th{color:#bfdbfe;font-weight:600;}
+.hit-table tr:hover{background:#0b1120;}
+</style>
+</head>
+<body>
+<h1>賓果 1-99 預測器（衰減權重 + 抽樣 Top10）</h1>
+
+<div id="stats" style="color:#60a5fa;font-size:13px;line-height:1.4;margin-bottom:8px"></div>
+<div style="color:#94a3b8;font-size:13px;margin-bottom:10px">
+  建議預設：r=0.80、啟用「🔁 熱號連開懲罰」與「避免重複上一期」。<br>
+  注意：賓果組合數巨大，本工具用「加權抽樣」找 Top10，不會列舉全部組合。
+</div>
+
+<div class="card">
+  <label>衰減權重 r</label>
+  <div class="row">
+    <input id="r" type="number" step="0.01" value="0.8" min="0" max="1" style="max-width:100px">
+    <button class="btn sec" type="button" onclick="setR(0.6)">r=0.6</button>
+    <button class="btn sec" type="button" onclick="setR(0.8)">r=0.8</button>
+    <button class="btn sec" type="button" onclick="setR(0.95)">r=0.95</button>
+  </div>
+
+  <div class="row" style="margin-top:8px">
+    <label class="switch"><input type="checkbox" id="streak" checked> 🔁 熱號連開懲罰</label>
+    <label class="switch"><input type="checkbox" id="avoidRepeat" checked onchange="toggleStrict()"> 避免重複上一期</label>
+    <label id="strictWrap"><input type="checkbox" id="strictRepeat"> 嚴格排除（重複 ≥2 顆直接剃除）</label>
+    <label class="switch"><input type="checkbox" id="neighbor" checked> ±2 鄰近加權</label>
+  </div>
+
+  <label style="margin-top:8px">我的下注（五顆一組，每行一組）</label>
+  <textarea id="bets" placeholder="例如：24 34 58 67 84&#10;8 29 50 69 92"></textarea>
+
+  <div class="row" style="margin-top:8px">
+    <button class="btn" type="button" onclick="run()">計算/預測</button>
+  </div>
+
+  <div class="divider" style="margin:10px 0"></div>
+  <label>新增最新一期（五顆）</label>
+  <input id="latest" placeholder="例如：27 35 37 43 71">
+  <div class="row">
+    <button class="btn" type="button" onclick="appendLatest()">＋ 加入到歷史</button>
+    <button class="btn sec" type="button" onclick="clearAdded()">重置本機新增</button>
+  </div>
+
+  <div class="divider" style="margin:10px 0"></div>
+  <label>抽樣次數（越大越準，但越慢）</label>
+  <input id="samples" type="number" value="50000" min="1000" step="1000" style="max-width:160px">
+</div>
+
+<div class="card">
+  <h3>🔢 各號碼機率分佈（Top10）</h3>
+  <div style="font-size:12px;color:#9ca3af;margin-bottom:4px">
+    單號平均理論機率：約 5.05%（完全隨機：5/99）
+  </div>
+  <div id="singleTop" class="mono split2" style="margin-top:6px;">
+    <div style="grid-column:1 / -1;font-size:13px;color:#9ca3af">尚未計算，請先按「計算/預測」。</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>💡 最新推薦結果（Top1～Top10，五顆）</h3>
+  <div style="font-size:12px;color:#9ca3af;margin-bottom:4px">
+    由加權抽樣挑選分數最高的 10 組（非列舉全部組合）
+  </div>
+  <div id="toplist" class="mono split2" style="margin-top:6px;"></div>
+</div>
+
+<div class="card">
+  <h3>📊 各數字累計開出次數（含本機新增）</h3>
+  <div id="countGrid" class="mono split2" style="margin-top:6px;"></div>
+  <div id="countSummary" style="font-size:12px;color:#9ca3af;margin-top:4px"></div>
+</div>
+
+<div class="card">
+  <h3>我的下注結果</h3>
+  <div id="myres" class="mono" style="font-size:13px;color:#94a3b8">尚未計算</div>
+</div>
+
+<div class="card">
+  <h3>📈 命中紀錄表（回測：以 TopN 預測下一期）</h3>
+  <div style="font-size:12px;color:#9ca3af;margin-bottom:6px">
+    回測採用前
+    <select id="topN" onchange="run()" style="width:auto;display:inline-block;background:#020617;color:#e5e7eb;border:1px solid rgba(148,163,184,.6);border-radius:999px;padding:2px 10px;font-size:12px;margin:0 4px;">
+      <option value="1">1</option>
+      <option value="3" selected>3</option>
+      <option value="5">5</option>
+      <option value="10">10</option>
+    </select>
+    組
+  </div>
+  <div id="hitSummary" style="font-size:12px;color:#9ca3af;margin-bottom:4px">尚未回測。請先按「計算/預測」。</div>
+  <div class="hit-table-wrapper">
+    <table class="hit-table" id="hitTable">
+      <thead>
+        <tr>
+          <th>期數</th>
+          <th>開獎號碼</th>
+          <th>最佳命中</th>
+          <th>命中組合（最佳）</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const N_NUM = 99;
+const DRAW_K = 5;
+
+// 你可在此預填歷史（每期五顆）：
+const baseHistory = [];
+
+const LS_KEY = "bingo_extraHist_v1";
+let added = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+
+function toggleStrict(){
+  document.getElementById("strictWrap").style.display =
+    document.getElementById("avoidRepeat").checked ? "inline-block" : "none";
+}
+toggleStrict();
+
+function setR(v){ document.getElementById("r").value = v; }
+function getAll(){ return baseHistory.concat(added); }
+
+function appendLatest(){
+  const v = document.getElementById("latest").value.trim().split(/\s+/).map(Number);
+  if(v.length===DRAW_K && v.every(n=>Number.isFinite(n) && n>=1 && n<=N_NUM)){
+    const uniq=[...new Set(v)];
+    if(uniq.length!==DRAW_K){ alert("同一期號碼不可重複"); return; }
+    added.push(uniq);
+    localStorage.setItem(LS_KEY, JSON.stringify(added));
+    updateStats();
+    alert("已加入！");
+    document.getElementById("latest").value="";
+  }else{
+    alert(`請輸入 ${DRAW_K} 個 1~${N_NUM} 的數字`);
+  }
+}
+function clearAdded(){
+  if(confirm("確定清除？")){
+    added=[];
+    localStorage.removeItem(LS_KEY);
+    updateStats();
+  }
+}
+
+function updateStats(){
+  const histAll=getAll();
+  const total=histAll.length;
+  const latest=(histAll[total-1]||[]).join(" ");
+  document.getElementById("stats").innerHTML =
+    `📊 目前共有 ${total} 期（含 ${added.length} 期本機新增）<br>最新一期：${latest||"—"}`;
+  const counts=tallyCounts(histAll);
+  renderCounts(counts,histAll);
+}
+updateStats();
+
+function singleProbsByR(hist,r,sp){
+  const w=Array(N_NUM).fill(0), n=hist.length;
+  for(let i=0;i<n;i++){
+    const ww=Math.pow(r,n-1-i);
+    for(const x of hist[i]) w[x-1]+=ww;
+  }
+  if(sp && n>0){
+    for(let num=1;num<=N_NUM;num++){
+      let streak=0, miss=0, maxStreak=0, maxMiss=0;
+      for(let i=0;i<n;i++){
+        if(hist[i].includes(num)){ streak++; maxStreak=Math.max(maxStreak,streak); miss=0; }
+        else{ miss++; maxMiss=Math.max(maxMiss,miss); streak=0; }
+      }
+      if(maxStreak>=3) w[num-1]*=0.85;
+      if(maxStreak>=4) w[num-1]*=0.75;
+      if(maxMiss>=8)   w[num-1]*=1.10;
+      if(maxMiss>=12)  w[num-1]*=1.18;
+    }
+  }
+  const s=w.reduce((a,b)=>a+b,0) || 1;
+  return w.map(v=>v/s);
+}
+
+function applyNeighborBoost(probs,hist){
+  const n=hist.length;
+  if(n===0) return probs.slice();
+  const last=hist[n-1];
+  const boosted=probs.slice();
+  const boost1=1.08, boost2=1.04;
+  for(const x of last){
+    for(const d of [-2,-1,1,2]){
+      const y=x+d;
+      if(y>=1 && y<=N_NUM){
+        boosted[y-1]*=(Math.abs(d)===1?boost1:boost2);
+      }
+    }
+  }
+  const s=boosted.reduce((a,b)=>a+b,0) || 1;
+  return boosted.map(v=>v/s);
+}
+
+function scoreCombo(combo, probs, hist, avoid, strict){
+  let sc=0;
+  for(const x of combo){
+    const p=probs[x-1] || 1e-12;
+    sc += Math.log(p);
+  }
+  const sorted=[...combo].sort((a,b)=>a-b);
+  let adj=0;
+  for(let i=1;i<sorted.length;i++) if(sorted[i]-sorted[i-1]===1) adj++;
+  if(adj>=2) sc -= 0.25;
+  if(adj>=3) sc -= 0.60;
+
+  const min=sorted[0], max=sorted[sorted.length-1];
+  if(max-min<=12) sc -= 0.25;
+
+  if(hist.length){
+    const last=hist[hist.length-1];
+    const same=combo.filter(x=>last.includes(x)).length;
+    if(avoid){
+      if(strict && same>=2) return -Infinity;
+      if(same===1) sc -= 0.12;
+      if(same===2) sc -= 0.35;
+      if(same===3) sc -= 0.80;
+      if(same>=4) sc -= 1.50;
+    }
+  }
+  return sc;
+}
+
+// 改良抽樣：key = log(u)/w（避免 u^(1/w) 在 w 很小時全部趨近 0）
+function weightedSampleWithoutReplacement(probs, k){
+  const keys=[];
+  for(let i=1;i<=N_NUM;i++){
+    const w=Math.max(probs[i-1], 1e-12);
+    const u=Math.random();
+    const key=Math.log(u) / w;
+    keys.push({num:i, key});
+  }
+  keys.sort((a,b)=>b.key-a.key);
+  return keys.slice(0,k).map(x=>x.num);
+}
+
+function computeTopCombosBySampling(hist, probs, avoid, strict, samples){
+  const top=[];
+  const seen=new Set();
+  for(let s=0;s<samples;s++){
+    const combo=weightedSampleWithoutReplacement(probs, DRAW_K).sort((a,b)=>a-b);
+    const key=combo.join(",");
+    if(seen.has(key)) continue;
+    seen.add(key);
+
+    const sc=scoreCombo(combo, probs, hist, avoid, strict);
+    if(!Number.isFinite(sc)) continue;
+
+    if(top.length<10){
+      top.push({combo, sc});
+      top.sort((a,b)=>b.sc-a.sc);
+    }else if(sc>top[top.length-1].sc){
+      top[top.length-1]={combo, sc};
+      top.sort((a,b)=>b.sc-a.sc);
+    }
+  }
+  return top;
+}
+
+function fmtScoreToIndicator(sc){ return sc.toFixed(4); }
+
+function tallyCounts(hist){
+  const counts=Array(N_NUM).fill(0);
+  for(const draw of hist) for(const x of draw) counts[x-1]++;
+  return counts;
+}
+
+function renderCounts(counts,hist){
+  const totalBalls = hist.length * DRAW_K;
+  const items = counts.map((c,i)=>({num:i+1,c,p:totalBalls?c/totalBalls:0}))
+    .sort((a,b)=>b.c-a.c).slice(0,10);
+
+  const left=items.slice(0,5), right=items.slice(5,10);
+  const chipHtml=o=>`
+    <div class="chip">
+      <span class="label">號碼 ${o.num}</span>
+      <span class="value">${o.c} 次｜${(o.p*100).toFixed(2)}%</span>
+    </div>`;
+  document.getElementById("countGrid").innerHTML =
+    `<div>${left.map(chipHtml).join("")}</div><div>${right.map(chipHtml).join("")}</div>`;
+  document.getElementById("countSummary").textContent =
+    `累計 ${hist.length} 期，共 ${totalBalls} 顆次。顯示出現次數 Top10。`;
+}
+
+function updateSingleTop(probs){
+  const arr=probs.map((p,i)=>({num:i+1,p})).sort((a,b)=>b.p-a.p).slice(0,10);
+  const left=arr.slice(0,5), right=arr.slice(5,10);
+  const render=(o,rank)=>{
+    const cls=rank<=3?"chip rankTop":"chip";
+    return `<div class="${cls}">
+      <span class="label">#${rank} 號碼 ${o.num}</span>
+      <span class="value">${(o.p*100).toFixed(3)}%</span>
+    </div>`;
+  };
+  document.getElementById("singleTop").innerHTML =
+    `<div>${left.map((o,i)=>render(o,i+1)).join("")}</div><div>${right.map((o,i)=>render(o,i+6)).join("")}</div>`;
+}
+
+function backtestTopN(hist,r,sp,avoid,strict,neighbor,topN,samples){
+  const n=hist.length, rows=[];
+  if(n<3) return rows;
+  for(let i=1;i<n-1;i++){
+    const train=hist.slice(0,i+1);
+    const target=hist[i+1];
+    let probs=singleProbsByR(train,r,sp);
+    if(neighbor) probs=applyNeighborBoost(probs, train);
+
+    const top=computeTopCombosBySampling(train, probs, avoid, strict, Math.max(8000, Math.floor(samples/5)))
+      .slice(0, topN);
+
+    let bestHit=0;
+    const hitCombos=[];
+    for(const item of top){
+      const hit=item.combo.filter(x=>target.includes(x)).length;
+      if(hit>0) hitCombos.push({combo:item.combo, hit});
+      if(hit>bestHit) bestHit=hit;
+    }
+    rows.push({issue:i+2,target,bestHit,hitCombos});
+  }
+  return rows;
+}
+
+function renderHits(rows,topN){
+  const summary=document.getElementById("hitSummary");
+  const tbody=document.querySelector("#hitTable tbody");
+  if(!rows.length){
+    summary.textContent="歷史期數不足，無法回測（至少需要 3 期）。";
+    tbody.innerHTML="";
+    return;
+  }
+  const totalAll=rows.length;
+  const displayRows= totalAll>30 ? rows.slice(-30) : rows;
+
+  let c5=0,c4=0,c3=0,c2=0,c1=0,c0=0,any=0;
+  for(const r of displayRows){
+    if(r.bestHit>=1) any++;
+    if(r.bestHit===5) c5++; else if(r.bestHit===4) c4++; else if(r.bestHit===3) c3++;
+    else if(r.bestHit===2) c2++; else if(r.bestHit===1) c1++; else c0++;
+  }
+  summary.textContent =
+    `共 ${totalAll} 期（顯示 ${displayRows.length} 期）；Top${topN} 回測：至少中 1 顆 ${any} 期；中5:${c5} 中4:${c4} 中3:${c3} 中2:${c2} 中1:${c1} 0中:${c0}`;
+
+  let html="";
+  for(const r of displayRows){
+    const issue=`第 ${r.issue} 期`;
+    const targetStr=r.target.join(" ");
+    const hitLabel=r.bestHit?`${r.bestHit} 顆`:"0 顆";
+    let comboStr="—";
+    if(r.hitCombos.length){
+      const best=r.bestHit;
+      comboStr=r.hitCombos.filter(x=>x.hit===best).map(x=>x.combo.join(" ")).join("、");
+    }
+    html += `<tr>
+      <td style="width:90px;white-space:nowrap;">${issue}</td>
+      <td>${targetStr}</td>
+      <td>${hitLabel}</td>
+      <td style="max-width:360px;word-break:break-all;">${comboStr}</td>
+    </tr>`;
+  }
+  tbody.innerHTML=html;
+}
+
+function run(){
+  const hist=getAll();
+  let r=parseFloat(document.getElementById("r").value);
+  if(!Number.isFinite(r) || r<=0 || r>=1){ r=0.8; document.getElementById("r").value="0.80"; }
+
+  const sp=document.getElementById("streak").checked;
+  const avoid=document.getElementById("avoidRepeat").checked;
+  const strict=document.getElementById("strictRepeat").checked;
+  const neighbor=document.getElementById("neighbor").checked;
+  const topN=parseInt(document.getElementById("topN").value,10)||3;
+  const samples=parseInt(document.getElementById("samples").value,10)||50000;
+
+  let probs=singleProbsByR(hist,r,sp);
+  if(neighbor) probs=applyNeighborBoost(probs,hist);
+
+  updateSingleTop(probs);
+
+  const top=computeTopCombosBySampling(hist,probs,avoid,strict,samples);
+  const left=top.slice(0,5), right=top.slice(5,10);
+
+  const renderCombo=(o,rank)=>{
+    const cls=rank<=3?"chip rankTop":"chip";
+    return `<div class="${cls}">
+      <span class="label">Top${rank}｜${o.combo.join(" ")}</span>
+      <span class="value">指標 ${fmtScoreToIndicator(o.sc)}</span>
+    </div>`;
+  };
+  document.getElementById("toplist").innerHTML =
+    `<div>${left.map((o,i)=>renderCombo(o,i+1)).join("")}</div><div>${right.map((o,i)=>renderCombo(o,i+6)).join("")}</div>`;
+
+  const bets=document.getElementById("bets").value.trim();
+  if(!bets){
+    document.getElementById("myres").textContent="尚未輸入下注。";
+  }else{
+    const lines=bets.split(/\n+/).map(l=>l.trim()).filter(Boolean);
+    const res=[];
+    for(const l of lines){
+      const arr=l.split(/\s+/).map(Number).filter(n=>Number.isFinite(n));
+      if(arr.length!==DRAW_K){ res.push(`${l} → 格式錯誤`); continue; }
+      const uniq=[...new Set(arr)];
+      if(uniq.length!==DRAW_K){ res.push(`${l} → 內含重複號碼`); continue; }
+      const combo=uniq.sort((a,b)=>a-b);
+      const sc=scoreCombo(combo,probs,hist,avoid,strict);
+      const key=combo.join(",");
+      const idx=top.findIndex(x=>x.combo.join(",")===key);
+      const rankText=idx>=0?`（Top${idx+1}）`:"";
+      res.push(`${combo.join(" ")} → 指標 ${fmtScoreToIndicator(sc)} ${rankText}`);
+    }
+    document.getElementById("myres").textContent=res.join("\n");
+  }
+
+  const rows=backtestTopN(hist,r,sp,avoid,strict,neighbor,topN,samples);
+  renderHits(rows,topN);
+  updateStats();
+}
+</script>
+</body>
+</html>
