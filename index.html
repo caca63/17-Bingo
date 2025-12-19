@@ -416,11 +416,20 @@ function run(){
   const top=computeTopCombosBySampling(hist,probs,avoid,strict,samples);
   const left=top.slice(0,5), right=top.slice(5,10);
 
+  const scs = top.map(x=>x.sc);
+  const maxSc = Math.max(...scs);
+  const minSc = Math.min(...scs);
+  const to100 = (sc)=>{
+    if(maxSc===minSc) return 100;
+    const v = (sc - minSc) * 100 / (maxSc - minSc);
+    return Math.max(0, Math.min(100, Math.round(v)));
+  };
+
   const renderCombo=(o,rank)=>{
     const cls=rank<=3?"chip rankTop":"chip";
     return `<div class="${cls}">
       <span class="label">Top${rank}｜${o.combo.join(" ")}</span>
-      <span class="value">指標 ${fmtScoreToIndicator(o.sc)}</span>
+      <span class="value">分數 ${to100(o.sc)}/100</span>
     </div>`;
   };
   document.getElementById("toplist").innerHTML =
@@ -442,7 +451,7 @@ function run(){
       const key=combo.join(",");
       const idx=top.findIndex(x=>x.combo.join(",")===key);
       const rankText=idx>=0?`（Top${idx+1}）`:"";
-      res.push(`${combo.join(" ")} → 指標 ${fmtScoreToIndicator(sc)} ${rankText}`);
+      res.push(`${combo.join(" ")} → 分數 ${to100(sc)}/100 ${rankText}`);
     }
     document.getElementById("myres").textContent=res.join("\n");
   }
