@@ -139,8 +139,12 @@ label.switch input{margin-right:4px;vertical-align:middle;}
 const N_NUM = 99;
 const DRAW_K = 5;
 
-// 你可在此預填歷史（每期五顆）：
-const baseHistory = [];
+// 內建歷史資料（已加入前兩期）
+const baseHistory = [
+  [18, 48, 69, 91, 13],
+  [53, 56, 49, 37, 20],
+  [21, 82, 45, 20, 71]
+];
 
 const LS_KEY = "bingo_extraHist_v1";
 let added = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
