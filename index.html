@@ -140,7 +140,7 @@ label.switch input{margin-right:4px;vertical-align:middle;}
 
 <div class="card">
   <h3>💡 最新推薦結果（Top1～Top10，五顆）</h3>
-  <div class="smallnote">Top10 為抽樣候選中的相對排名；分數 0–100。</div>
+  <div class="smallnote">Top10 依「抽樣出現率」排序（近似相對機率）；同時提供分數 0–100 作為輔助。</div>
   <div id="toplist" class="mono split2" style="margin-top:6px;"></div>
 </div>
 
@@ -189,6 +189,27 @@ label.switch input{margin-right:4px;vertical-align:middle;}
 <script>
 const N_NUM = 99;
 const DRAW_K = 5;
+
+// --- Deterministic RNG (Mulberry32) for stable backtests ---
+function mulberry32(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let x = Math.imul(t ^ (t >>> 15), 1 | t);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Cheap string->uint32 hash for seeding (FNV-1a)
+function hash32(str){
+  let h = 2166136261;
+  for(let i=0;i<str.length;i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
 
 // 第 1 期日期（你指定）
 const START_DATE = new Date(2025, 11, 16); // 11=12月
@@ -366,18 +387,18 @@ function makeCDF(probs, lo, hi){
   }
   return cdf;
 }
-function sampleFromCDF(cdf){
-  const u=Math.random();
+function sampleFromCDF(cdf, rng){
+  const u=(rng? rng(): Math.random());
   for(const it of cdf) if(u<=it.c) return it.x;
   return cdf[cdf.length-1].x;
 }
 
-function sampleSegmented(probs, preset){
+function sampleSegmented(probs, preset, rng){
   let lowN=0, midN=0, highN=0;
   if(preset==="1-3-1"){ lowN=1; midN=3; highN=1; }
   else if(preset==="1-2-2"){ lowN=1; midN=2; highN=2; }
   else if(preset==="2-2-1"){ lowN=2; midN=2; highN=1; }
-  else return weightedSampleWithoutReplacement(probs, DRAW_K);
+  else return weightedSampleWithoutReplacement(probs, DRAW_K, rng);
 
   const cdfL=makeCDF(probs,1,33);
   const cdfM=makeCDF(probs,34,66);
@@ -386,7 +407,7 @@ function sampleSegmented(probs, preset){
   const chosen=new Set();
   function pick(cdf, need){
     while(need>0){
-      const x=sampleFromCDF(cdf);
+      const x=sampleFromCDF(cdf, rng);
       if(!chosen.has(x)){ chosen.add(x); need--; }
     }
   }
@@ -398,42 +419,50 @@ function sampleSegmented(probs, preset){
 }
 
 // 不放回抽樣：key=log(u)/w
-function weightedSampleWithoutReplacement(probs, k){
+function weightedSampleWithoutReplacement(probs, k, rng){
   const keys=[];
   for(let i=1;i<=N_NUM;i++){
     const w=Math.max(probs[i-1], 1e-12);
-    const u=Math.random();
+    const u=(rng? rng(): Math.random());
     keys.push({num:i, key: Math.log(u)/w});
   }
   keys.sort((a,b)=>b.key-a.key);
   return keys.slice(0,k).map(x=>x.num).sort((a,b)=>a-b);
 }
 
-function computeTopCombosBySampling(hist, probs, avoidOn, avoidN, strict, samples, preset){
-  const top=[];
-  const seen=new Set();
-
+function computeTopCombosBySampling(hist, probs, avoidOn, avoidN, strict, samples, preset, rng){
+  // Monte Carlo sampling: count how often each valid combo appears under the sampling policy
+  // This "出現率" is a proxy for relative probability under the current model + constraints.
+  const counts = new Map();  // key -> {combo, cnt}
   for(let s=0;s<samples;s++){
     const combo = (preset==="free")
-      ? weightedSampleWithoutReplacement(probs, DRAW_K)
-      : sampleSegmented(probs, preset);
+      ? weightedSampleWithoutReplacement(probs, DRAW_K, rng)
+      : sampleSegmented(probs, preset, rng);
 
-    const key=combo.join(",");
-    if(seen.has(key)) continue;
-    seen.add(key);
-
-    const sc=scoreCombo(combo, probs, hist, avoidOn, avoidN, strict);
+    // Score/constraints
+    const sc = scoreCombo(combo, probs, hist, avoidOn, avoidN, strict);
     if(!Number.isFinite(sc)) continue;
 
-    if(top.length<10){
-      top.push({combo, sc});
-      top.sort((a,b)=>b.sc-a.sc);
-    }else if(sc>top[top.length-1].sc){
-      top[top.length-1]={combo, sc};
-      top.sort((a,b)=>b.sc-a.sc);
-    }
+    const key = combo.join(",");
+    const cur = counts.get(key);
+    if(cur) cur.cnt += 1;
+    else counts.set(key, {combo, cnt: 1, sc});
   }
-  return top;
+
+  // Build list with estimated frequency
+  const arr = [];
+  for(const v of counts.values()){
+    arr.push({
+      combo: v.combo,
+      sc: v.sc,
+      cnt: v.cnt,
+      pEst: v.cnt / samples
+    });
+  }
+
+  // Rank: primary by estimated frequency, secondary by score
+  arr.sort((a,b)=> (b.pEst - a.pEst) || (b.sc - a.sc));
+  return arr.slice(0, 10);
 }
 
 function updateSingleTop(probs){
@@ -494,10 +523,14 @@ function backtestTopN(hist, opts){
     }
 
 
-    const top=computeTopCombosBySampling(
+    // Deterministic seed: stable across UI toggles like TopN (so TopN only slices)
+    const seedStr = `${i}|${opts.r}|${opts.streak}|${opts.neighbor}|${opts.avoidOn}|${opts.avoidN}|${opts.strict}|${opts.hotSuppress}|${opts.hotStrength}|${opts.hotWindow}|${opts.preset}|${opts.alpha}|${opts.eps}`;
+    const rng = mulberry32(hash32(seedStr));
+    const topAll = computeTopCombosBySampling(
       train, probs, opts.avoidOn, opts.avoidN, opts.strict,
-      Math.max(12000, Math.floor(opts.samples/5)), opts.preset
-    ).slice(0, opts.topN);
+      Math.max(12000, Math.floor(opts.samples/5)), opts.preset, rng
+    );
+    const top = topAll.slice(0, opts.topN);
 
     let bestHit=0;
     const hitCombos=[];
@@ -593,7 +626,12 @@ function run(){
 
   updateSingleTop(probs);
 
-  const top=computeTopCombosBySampling(hist,probs,avoidOn,avoidN,strict,samples,preset);
+    // Deterministic seed for main recommendations (stable across clicks)
+  const lastStr = hist.length ? hist[hist.length-1].join(",") : "";
+  const seedStrMain = `${hist.length}|${lastStr}|${r}|${streak}|${neighbor}|${avoidOn}|${avoidN}|${strict}|${hotSuppress}|${hotStrength}|${hotWindow}|${preset}|${samples}|${alpha}|${eps}`;
+  const rngMain = mulberry32(hash32(seedStrMain));
+
+const top=computeTopCombosBySampling(hist,probs,avoidOn,avoidN,strict,samples,preset,rngMain);
 
   const scs=top.map(x=>x.sc);
   const maxSc=Math.max(...scs), minSc=Math.min(...scs);
@@ -608,7 +646,7 @@ function run(){
     const cls=rank<=3?"chip rankTop":"chip";
     return `<div class="${cls}">
       <span class="label">Top${rank}｜${o.combo.join(" ")}</span>
-      <span class="value">分數 ${to100(o.sc)}/100</span>
+      <span class="value">出現率 ${ (o.pEst*100).toFixed(2) }%｜分數 ${to100(o.sc)}/100</span>
     </div>`;
   };
   document.getElementById("toplist").innerHTML =
@@ -630,7 +668,7 @@ function run(){
       const sc=scoreCombo(combo,probs,hist,avoidOn,avoidN,strict);
       const key=combo.join(",");
       const idx=top.findIndex(x=>x.combo.join(",")===key);
-      const rankText=idx>=0?`（Top${idx+1}）`:"";
+      const rankText=idx>=0?`（Top${idx+1}｜出現率 ${(top[idx].pEst*100).toFixed(2)}%）`:"";
       res.push(`${combo.join(" ")} → 分數 ${to100(sc)}/100 ${rankText}`);
     }
     document.getElementById("myres").textContent=res.join("\n");
