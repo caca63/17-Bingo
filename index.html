@@ -43,6 +43,22 @@ label.switch input{margin-right:4px;vertical-align:middle;}
   Top10 顯示為 0–100 分數（僅用於相對排名）。
 </div>
 
+
+<div class="card">
+  <h3>🔎 推薦對照模式</h3>
+  <div class="smallnote" style="margin-bottom:8px">
+    主畫面推薦預設是「用全部歷史去預測下一期」。若你要對照回測某一期，請切到「回測對照」並選擇「訓練截至期數」。
+    例如：回測表第 16 期是用前 15 期預測第 16 期；那主畫面要對照請選「訓練截至：15」。
+  </div>
+  <div class="row">
+    <select id="viewMode" style="width:auto" onchange="run()">
+      <option value="next" selected>預測下一期（用全部歷史）</option>
+      <option value="backtest">回測對照（用前 N 期訓練）</option>
+    </select>
+    <span class="smallnote">訓練截至期數</span>
+    <select id="viewN" style="width:auto" onchange="run()"></select>
+  </div>
+</div>
 <div class="card">
   <label>衰減權重 r（建議 0.95～0.98 降低追熱）</label>
   <div class="row">
@@ -275,6 +291,24 @@ function updateStats(){
     `📊 目前共有 ${total} 期（含 ${added.length} 期本機新增）<br>最新一期（${latestDate}）：${latest||"—"}`;
   const counts=tallyCounts(histAll);
   renderCounts(counts,histAll);
+
+  // Populate "訓練截至期數" 下拉（1..histAll.length）
+  const viewN = document.getElementById("viewN");
+  if(viewN){
+    const cur = parseInt(viewN.value||"",10);
+    viewN.innerHTML = "";
+    for(let i=1;i<=histAll.length;i++){
+      const opt=document.createElement("option");
+      opt.value=String(i);
+      opt.textContent = `${i}`;
+      viewN.appendChild(opt);
+    }
+    if(Number.isFinite(cur) && cur>=1 && cur<=histAll.length) viewN.value=String(cur);
+    else viewN.value=String(histAll.length);
+    const mode = (document.getElementById("viewMode")||{}).value || "next";
+    viewN.disabled = (mode !== "backtest");
+  }
+
 }
 updateStats();
 
@@ -528,7 +562,7 @@ function backtestTopN(hist, opts){
     const rng = mulberry32(hash32(seedStr));
     const topAll = computeTopCombosBySampling(
       train, probs, opts.avoidOn, opts.avoidN, opts.strict,
-      Math.max(12000, Math.floor(opts.samples/5)), opts.preset, rng
+      opts.samples, opts.preset, rng
     );
     const top = topAll.slice(0, opts.topN);
 
@@ -590,6 +624,15 @@ function renderHits(rows,topN){
 function run(){
   const hist=getAll();
 
+  // View mode: either predict next (use full history) or match a backtest row (use first N draws)
+  const modeEl=document.getElementById('viewMode');
+  const nEl=document.getElementById('viewN');
+  const viewMode = modeEl ? modeEl.value : 'next';
+  const trainN = nEl ? (parseInt(nEl.value,10) || hist.length) : hist.length;
+  if(nEl) nEl.disabled = (viewMode !== 'backtest');
+  const trainHist = (viewMode==='backtest') ? hist.slice(0, Math.max(1, Math.min(trainN, hist.length))) : hist;
+
+
   let r=parseFloat(document.getElementById("r").value);
   if(!Number.isFinite(r) || r<=0 || r>=1){ r=0.95; document.getElementById("r").value="0.95"; }
 
@@ -613,9 +656,9 @@ function run(){
   const eps=parseFloat(document.getElementById("eps").value);
 
 
-  let probs=singleProbsByR(hist,r,streak,alpha);
-  if(hotSuppress) probs=applyHotSuppression(probs,hist,hotWindow,hotStrength);
-  if(neighbor) probs=applyNeighborBoost(probs,hist);
+  let probs=singleProbsByR(trainHist,r,streak,alpha);
+  if(hotSuppress) probs=applyHotSuppression(probs,trainHist,hotWindow,hotStrength);
+  if(neighbor) probs=applyNeighborBoost(probs,trainHist);
   // 探索比例：混入均勻分布，避免只集中在歷史開過的號碼
   const epsClamped = Number.isFinite(eps) ? Math.max(0, Math.min(0.8, eps)) : 0;
   if(epsClamped>0){
@@ -629,11 +672,11 @@ function run(){
   updateSingleTop(probs);
 
     // Deterministic seed for main recommendations (stable across clicks)
-  const lastStr = hist.length ? hist[hist.length-1].join(",") : "";
-  const seedStrMain = `${hist.length}|${lastStr}|${r}|${streak}|${neighbor}|${avoidOn}|${avoidN}|${strict}|${hotSuppress}|${hotStrength}|${hotWindow}|${preset}|${samples}|${alpha}|${eps}`;
+  const lastStr = trainHist.length ? trainHist[trainHist.length-1].join(",") : "";
+  const seedStrMain = `${trainHist.length}|${lastStr}|${r}|${streak}|${neighbor}|${avoidOn}|${avoidN}|${strict}|${hotSuppress}|${hotStrength}|${hotWindow}|${preset}|${samples}|${alpha}|${eps}`;
   const rngMain = mulberry32(hash32(seedStrMain));
 
-const top=computeTopCombosBySampling(hist,probs,avoidOn,avoidN,strict,samples,preset,rngMain);
+const top=computeTopCombosBySampling(trainHist,probs,avoidOn,avoidN,strict,samples,preset,rngMain);
 
   const scs=top.map(x=>x.sc);
   const maxSc=Math.max(...scs), minSc=Math.min(...scs);
@@ -667,7 +710,7 @@ const top=computeTopCombosBySampling(hist,probs,avoidOn,avoidN,strict,samples,pr
       if(uniq.length!==DRAW_K){ res.push(`${l} → 內含重複號碼`); continue; }
       const combo=uniq.sort((a,b)=>a-b);
 
-      const sc=scoreCombo(combo,probs,hist,avoidOn,avoidN,strict);
+      const sc=scoreCombo(combo,probs,trainHist,avoidOn,avoidN,strict);
       const key=combo.join(",");
       const idx=top.findIndex(x=>x.combo.join(",")===key);
       const rankText=idx>=0?`（Top${idx+1}｜出現率 ${(top[idx].pEst*100).toFixed(2)}%）`:"";
