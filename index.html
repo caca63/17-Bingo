@@ -5,36 +5,21 @@
 <title>三骰專業分析器</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
-body{
-  background:#0f172a;
-  color:#e5e7eb;
-  font-family:Arial;
-  text-align:center;
-}
-.container{max-width:1000px;margin:auto;padding:20px;}
+body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
+.container{max-width:1100px;margin:auto;padding:20px;}
 .dice-btn{
-  width:50px;height:50px;
-  margin:5px;
-  font-size:18px;
-  border-radius:8px;
-  border:none;
-  cursor:pointer;
-  background:#1e293b;
-  color:white;
+  width:50px;height:50px;margin:5px;
+  font-size:18px;border-radius:8px;border:none;
+  cursor:pointer;background:#1e293b;color:white;
 }
-.selected{background:#facc15;color:black;}
 .card{
-  background:#1e293b;
-  padding:20px;
-  margin-top:20px;
-  border-radius:12px;
+  background:#1e293b;padding:20px;
+  margin-top:20px;border-radius:12px;
 }
-.prob{font-size:36px;font-weight:bold;}
-.low{color:#38bdf8;}
-.mid{color:#facc15;}
-.high{color:#f87171;}
-.big{color:#f87171;font-size:24px;}
-.small{color:#38bdf8;font-size:24px;}
+.prob{font-size:34px;font-weight:bold;}
+.big{color:#f87171;font-size:22px;}
+.small{color:#38bdf8;font-size:22px;}
+.stat{font-size:14px;color:#94a3b8;}
 </style>
 </head>
 <body>
@@ -45,21 +30,26 @@ body{
 <div class="card">
 <h3>選擇三顆骰子</h3>
 <div id="diceButtons"></div>
-<div style="margin-top:10px;">
-已選：<span id="selectedDice"></span>
-</div>
+<div style="margin-top:10px;">已選：<span id="selectedDice"></span></div>
 <button onclick="submitRound()" style="margin-top:15px;padding:10px 20px;">確認新增</button>
 </div>
 
 <div class="card">
 <h3>特殊機率（豹子+17）</h3>
 <div id="specialProb" class="prob">4.17%</div>
+<div id="gapInfo"></div>
 <div id="weights"></div>
 </div>
 
 <div class="card">
 <h3>大小預測</h3>
 <div id="bigSmall"></div>
+<div class="stat">大小預測準確率：<span id="accuracy">0%</span></div>
+</div>
+
+<div class="card">
+<h3>最近30局</h3>
+<div id="history"></div>
 </div>
 
 <div class="card">
@@ -71,12 +61,14 @@ body{
 
 <script>
 const BASE_SPECIAL=0.0417;
-const BASE_BIG=105/216;   // 約48.6%
-const BASE_SMALL=105/216;
+const BASE_BIG=0.486;
+const BASE_SMALL=0.486;
 
 let rounds=[];
 let selected=[];
 let specialProbs=[];
+let bigSmallPredictions=[];
+let correctCount=0;
 
 function createButtons(){
   const container=document.getElementById("diceButtons");
@@ -109,8 +101,15 @@ function submitRound(){
   const is17=(sum===17);
   const isSpecial=isBao||is17;
 
-  rounds.push({d1,d2,d3,sum,isSpecial});
+  const size=sum>=11?"大":"小";
 
+  // 驗證上一把預測是否命中
+  if(bigSmallPredictions.length>0){
+    const lastPred=bigSmallPredictions[bigSmallPredictions.length-1];
+    if(lastPred===size) correctCount++;
+  }
+
+  rounds.push({d1,d2,d3,sum,isSpecial,size});
   selected=[];
   document.getElementById("selectedDice").innerText="";
 
@@ -139,18 +138,15 @@ function intervalWeight(gap){
 function densityWeight(){
   const last=rounds.slice(-3);
   if(last.length===0) return 1;
-
   const freq=[0,0,0,0,0,0];
   last.forEach(r=>{
     freq[r.d1-1]++;
     freq[r.d2-1]++;
     freq[r.d3-1]++;
   });
-
   const mean=freq.reduce((a,b)=>a+b)/6;
   const variance=freq.reduce((a,b)=>a+(b-mean)**2,0)/6;
   const std=Math.sqrt(variance);
-
   return 1+std*0.15;
 }
 
@@ -160,32 +156,34 @@ function structureWeight(){
   const arr=[last.d1,last.d2,last.d3];
   const set=new Set(arr);
   let w=1;
-
   if(set.size===2){
     arr.sort((a,b)=>a-b);
     if(Math.abs(arr[2]-arr[0])>=3) w+=0.2;
   }
-
-  if(set.size===1){
-    w+=0.4;
-  }
-
+  if(set.size===1){ w+=0.4; }
   return w;
 }
 
+// 改良大小平衡模型
 function bigSmallTrend(){
-  const last=rounds.slice(-10);
+  const last=rounds.slice(-20);
   let big=0,small=0;
 
   last.forEach(r=>{
-    if(r.sum>=11) big++;
-    if(r.sum<=10) small++;
+    if(r.size==="大") big++;
+    if(r.size==="小") small++;
   });
 
-  const bias=(big-small)/10;
+  const total=big+small;
+  if(total===0) return {bigProb:BASE_BIG,smallProb:BASE_SMALL};
 
-  let bigProb=BASE_BIG+(bias*0.05);
-  let smallProb=BASE_SMALL-(bias*0.05);
+  const ratio=(big-small)/total;
+
+  // 均值回歸因子 0.5
+  const adjustedBias=ratio*0.05*0.5;
+
+  let bigProb=BASE_BIG+adjustedBias;
+  let smallProb=BASE_SMALL-adjustedBias;
 
   return {bigProb,smallProb};
 }
@@ -204,25 +202,32 @@ function calculate(){
   document.getElementById("specialProb").innerText=
     (special*100).toFixed(2)+"%";
 
+  document.getElementById("gapInfo").innerText=
+    "距離上次特殊局數："+gap;
+
   document.getElementById("weights").innerText=
     "Interval x"+w1.toFixed(2)+
     " | Density x"+w2.toFixed(2)+
     " | Structure x"+w3.toFixed(2);
 
   const trend=bigSmallTrend();
+  let prediction=trend.bigProb>trend.smallProb?"大":"小";
+  bigSmallPredictions.push(prediction);
 
-  let bigText=`大 ${(trend.bigProb*100).toFixed(1)}%`;
-  let smallText=`小 ${(trend.smallProb*100).toFixed(1)}%`;
+  document.getElementById("bigSmall").innerHTML=
+    `<div class="${prediction==="大"?"big":"small"}">
+      預測：${prediction}
+     </div>
+     <div>大 ${(trend.bigProb*100).toFixed(1)}% | 小 ${(trend.smallProb*100).toFixed(1)}%</div>`;
 
-  if(trend.bigProb>trend.smallProb){
-    document.getElementById("bigSmall").innerHTML=
-      `<div class="big">${bigText}</div>
-       <div>${smallText}</div>`;
-  }else{
-    document.getElementById("bigSmall").innerHTML=
-      `<div class="small">${smallText}</div>
-       <div>${bigText}</div>`;
-  }
+  const totalPred=bigSmallPredictions.length-1;
+  const acc=totalPred>0?(correctCount/totalPred*100).toFixed(1):0;
+  document.getElementById("accuracy").innerText=acc+"%";
+
+  document.getElementById("history").innerText=
+    rounds.slice(-30)
+    .map(r=>`${r.d1}${r.d2}${r.d3}${r.isSpecial?'★':''}`)
+    .join(" , ");
 
   drawChart();
 }
