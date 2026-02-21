@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>三骰特殊機率分析器</title>
+<title>三骰專業分析器</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
 body{
@@ -11,63 +11,55 @@ body{
   font-family:Arial;
   text-align:center;
 }
-.container{
-  max-width:900px;
-  margin:auto;
-  padding:20px;
-}
-input{
-  width:60px;
-  height:40px;
-  font-size:20px;
-  text-align:center;
-}
-button{
-  padding:10px 20px;
-  font-size:16px;
-  margin-top:10px;
+.container{max-width:1000px;margin:auto;padding:20px;}
+.dice-btn{
+  width:50px;height:50px;
+  margin:5px;
+  font-size:18px;
+  border-radius:8px;
+  border:none;
   cursor:pointer;
+  background:#1e293b;
+  color:white;
 }
+.selected{background:#facc15;color:black;}
 .card{
   background:#1e293b;
   padding:20px;
   margin-top:20px;
   border-radius:12px;
 }
-.prob{
-  font-size:40px;
-  font-weight:bold;
-}
+.prob{font-size:36px;font-weight:bold;}
 .low{color:#38bdf8;}
 .mid{color:#facc15;}
 .high{color:#f87171;}
+.big{color:#f87171;font-size:24px;}
+.small{color:#38bdf8;font-size:24px;}
 </style>
 </head>
 <body>
+
 <div class="container">
-<h1>三骰特殊機率分析器</h1>
+<h1>三骰專業分析器</h1>
 
 <div class="card">
-<input id="d1" type="number" min="1" max="6">
-<input id="d2" type="number" min="1" max="6">
-<input id="d3" type="number" min="1" max="6">
-<br>
-<button onclick="addRound()">新增一局</button>
+<h3>選擇三顆骰子</h3>
+<div id="diceButtons"></div>
+<div style="margin-top:10px;">
+已選：<span id="selectedDice"></span>
+</div>
+<button onclick="submitRound()" style="margin-top:15px;padding:10px 20px;">確認新增</button>
 </div>
 
 <div class="card">
-<div>預測機率</div>
-<div id="prob" class="prob">4.17%</div>
-<div id="reason"></div>
+<h3>特殊機率（豹子+17）</h3>
+<div id="specialProb" class="prob">4.17%</div>
+<div id="weights"></div>
 </div>
 
 <div class="card">
-<div>距離上次特殊局數：<span id="gap">0</span></div>
-</div>
-
-<div class="card">
-<h3>最近30局</h3>
-<div id="history"></div>
+<h3>大小預測</h3>
+<div id="bigSmall"></div>
 </div>
 
 <div class="card">
@@ -78,16 +70,51 @@ button{
 </div>
 
 <script>
-const BASE_PROB = 0.0417;
-let rounds = [];
-let probs = [];
+const BASE_SPECIAL=0.0417;
+const BASE_BIG=105/216;   // 約48.6%
+const BASE_SMALL=105/216;
 
-function isBao(d1,d2,d3){
-  return d1===d2 && d2===d3;
+let rounds=[];
+let selected=[];
+let specialProbs=[];
+
+function createButtons(){
+  const container=document.getElementById("diceButtons");
+  for(let i=1;i<=6;i++){
+    const btn=document.createElement("button");
+    btn.innerText=i;
+    btn.className="dice-btn";
+    btn.onclick=()=>selectDice(i);
+    container.appendChild(btn);
+  }
+}
+createButtons();
+
+function selectDice(num){
+  if(selected.length<3){
+    selected.push(num);
+    document.getElementById("selectedDice").innerText=selected.join(" , ");
+  }
 }
 
-function is17(d1,d2,d3){
-  return (d1+d2+d3)===17;
+function submitRound(){
+  if(selected.length!==3){
+    alert("請選三顆");
+    return;
+  }
+
+  const [d1,d2,d3]=selected;
+  const sum=d1+d2+d3;
+  const isBao=(d1===d2&&d2===d3);
+  const is17=(sum===17);
+  const isSpecial=isBao||is17;
+
+  rounds.push({d1,d2,d3,sum,isSpecial});
+
+  selected=[];
+  document.getElementById("selectedDice").innerText="";
+
+  calculate();
 }
 
 function getGap(){
@@ -146,57 +173,56 @@ function structureWeight(){
   return w;
 }
 
+function bigSmallTrend(){
+  const last=rounds.slice(-10);
+  let big=0,small=0;
+
+  last.forEach(r=>{
+    if(r.sum>=11) big++;
+    if(r.sum<=10) small++;
+  });
+
+  const bias=(big-small)/10;
+
+  let bigProb=BASE_BIG+(bias*0.05);
+  let smallProb=BASE_SMALL-(bias*0.05);
+
+  return {bigProb,smallProb};
+}
+
 function calculate(){
   const gap=getGap();
   const w1=intervalWeight(gap);
   const w2=densityWeight();
   const w3=structureWeight();
 
-  let prob=BASE_PROB*w1*w2*w3;
-  if(prob>0.12) prob=0.12;
+  let special=BASE_SPECIAL*w1*w2*w3;
+  if(special>0.12) special=0.12;
 
-  return {prob,w1,w2,w3,gap};
-}
+  specialProbs.push((special*100).toFixed(2));
 
-function addRound(){
-  const d1=parseInt(document.getElementById("d1").value);
-  const d2=parseInt(document.getElementById("d2").value);
-  const d3=parseInt(document.getElementById("d3").value);
+  document.getElementById("specialProb").innerText=
+    (special*100).toFixed(2)+"%";
 
-  if(!d1||!d2||!d3||d1>6||d2>6||d3>6){
-    alert("請輸入1~6");
-    return;
+  document.getElementById("weights").innerText=
+    "Interval x"+w1.toFixed(2)+
+    " | Density x"+w2.toFixed(2)+
+    " | Structure x"+w3.toFixed(2);
+
+  const trend=bigSmallTrend();
+
+  let bigText=`大 ${(trend.bigProb*100).toFixed(1)}%`;
+  let smallText=`小 ${(trend.smallProb*100).toFixed(1)}%`;
+
+  if(trend.bigProb>trend.smallProb){
+    document.getElementById("bigSmall").innerHTML=
+      `<div class="big">${bigText}</div>
+       <div>${smallText}</div>`;
+  }else{
+    document.getElementById("bigSmall").innerHTML=
+      `<div class="small">${smallText}</div>
+       <div>${bigText}</div>`;
   }
-
-  const special=isBao(d1,d2,d3)||is17(d1,d2,d3);
-
-  rounds.push({d1,d2,d3,isSpecial:special});
-
-  const result=calculate();
-  probs.push((result.prob*100).toFixed(2));
-
-  updateUI(result);
-}
-
-function updateUI(result){
-  const percent=(result.prob*100).toFixed(2);
-  const probDiv=document.getElementById("prob");
-  probDiv.innerText=percent+"%";
-
-  probDiv.className="prob";
-  if(percent<5) probDiv.classList.add("low");
-  else if(percent<8) probDiv.classList.add("mid");
-  else probDiv.classList.add("high");
-
-  document.getElementById("gap").innerText=result.gap;
-
-  document.getElementById("reason").innerHTML=
-    "Interval x"+result.w1.toFixed(2)+
-    " | Density x"+result.w2.toFixed(2)+
-    " | Structure x"+result.w3.toFixed(2);
-
-  document.getElementById("history").innerText=
-    rounds.slice(-30).map(r=>`${r.d1}${r.d2}${r.d3}${r.isSpecial?'★':''}`).join(" , ");
 
   drawChart();
 }
@@ -204,11 +230,12 @@ function updateUI(result){
 function drawChart(){
   const chart=echarts.init(document.getElementById('chart'));
   chart.setOption({
-    xAxis:{type:'category',data:probs.map((_,i)=>i+1)},
+    xAxis:{type:'category',data:specialProbs.map((_,i)=>i+1)},
     yAxis:{type:'value'},
-    series:[{data:probs,type:'line',smooth:true}]
+    series:[{data:specialProbs,type:'line',smooth:true}]
   });
 }
 </script>
+
 </body>
 </html>
