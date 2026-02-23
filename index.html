@@ -1,299 +1,292 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>Dice Trading Terminal Pro</title>
+<title>三骰專業預測器 3.1</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
-body{font-family:Arial;background:#111;color:#eee}
-.container{display:flex}
-.left{width:60%}
-.right{width:40%;padding-left:20px}
-button{margin:3px;padding:6px 10px}
-.panel{background:#1c1c1c;padding:10px;margin-top:10px}
-.green{color:#4caf50}
-.orange{color:#ff9800}
-.red{color:#f44336}
-.small{color:#03a9f4}
-.big{color:#ff5722}
-.trendBox{display:flex;flex-wrap:wrap;max-width:300px}
-.trendItem{width:12px;height:12px;margin:2px}
-.win{background:#4caf50}
-.lose{background:#f44336}
-.skip{background:#777}
+body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
+.container{max-width:1300px;margin:auto;padding:20px;}
+.card{background:#1e293b;padding:20px;margin-top:20px;border-radius:12px;}
+.dice-btn{width:50px;height:50px;margin:5px;font-size:18px;border-radius:8px;border:none;cursor:pointer;background:#334155;color:white;}
+.prob{font-size:36px;font-weight:bold;}
+.cold{color:#38bdf8;}
+.warm{color:#facc15;}
+.hot{color:#f87171;}
+.big{color:#f87171;font-size:22px;}
+.small{color:#38bdf8;font-size:22px;}
+.flex{display:flex;gap:20px;}
+.side{width:260px;}
+.trend-box{display:flex;flex-wrap:wrap;gap:3px;margin-top:10px;}
+.win{width:12px;height:12px;background:#22c55e;}
+.lose{width:12px;height:12px;background:#ef4444;}
+.stat{font-size:13px;color:#94a3b8;}
 </style>
 </head>
 <body>
 
-<h2>Dice Trading Terminal Pro</h2>
-
-<div>
-初始資金: <input type="number" id="startMoney" value="10000">
-<button onclick="init()">啟動</button>
-</div>
-
 <div class="container">
 
-<div class="left">
+<h1>三骰專業預測器 3.1</h1>
 
-<h3>輸入骰子</h3>
-<div id="diceBtns"></div>
-<button onclick="submitRound()">送出</button>
-
-<div class="panel">
-<h3>預測</h3>
-<div id="prediction"></div>
-<div id="accuracy"></div>
+<div class="card">
+<h3>選擇三顆骰子</h3>
+<div id="diceButtons"></div>
+<div>已選：<span id="selectedDice"></span></div>
+<button onclick="submitRound()" style="margin-top:10px;padding:8px 15px;">確認新增</button>
 </div>
 
-<div class="panel">
-<h3>特殊機率</h3>
-<div id="specialProb"></div>
-<div id="intervalHistory"></div>
+<div class="flex">
+
+<div style="flex:1">
+
+<div class="card">
+<h3>特殊機率（豹子+17）</h3>
+<div id="specialProb" class="prob cold">4.17%</div>
+<div id="gapInfo"></div>
+<div id="gapHistory" class="stat"></div>
 </div>
 
-<div class="panel">
-<h3>交易面板</h3>
-<div id="tradePanel"></div>
+<div class="card">
+<h3>大小預測</h3>
+<div id="bigSmall"></div>
+<div class="stat">準確率：<span id="accuracy">0%</span></div>
+</div>
+
+<div class="card">
+<h3>資金管理</h3>
+<div id="bankrollInfo" class="stat"></div>
 </div>
 
 </div>
 
-<div class="right">
-
-<div class="panel">
-<h3>命中趨勢 (最近40)</h3>
-<div class="trendBox" id="trend"></div>
+<div class="side card">
+<h3>命中趨勢(20)</h3>
+<div id="trendBoxes" class="trend-box"></div>
+<div id="streakInfo" class="stat"></div>
 </div>
 
-<div class="panel">
-<h3>回測模擬</h3>
-局數: <input type="number" id="simRounds" value="500">
-<button onclick="runSimulation()">開始回測</button>
-<div id="simResult"></div>
 </div>
 
+<div class="card">
+<h3>最近30局</h3>
+<div id="history"></div>
+</div>
+
+<div class="card">
+<h3>特殊機率走勢</h3>
+<div id="chart" style="height:300px;"></div>
 </div>
 
 </div>
 
 <script>
 
-let history=[]
-let bankroll=0
-let peak=0
-let wins=0
-let losses=0
-let trend=[]
-let currentPrediction=null
-let lastSpecialIndex=-1
-let specialIntervals=[]
-let consecutiveWin=0
-let consecutiveLose=0
-let lockRounds=0
+const BASE_SPECIAL=0.0417;
+const BASE_BIG=0.486;
 
-function init(){
-  bankroll=parseFloat(document.getElementById("startMoney").value)
-  peak=bankroll
-  history=[]
-  wins=0
-  losses=0
-  trend=[]
-  specialIntervals=[]
-  lastSpecialIndex=-1
-  consecutiveWin=0
-  consecutiveLose=0
-  lockRounds=0
-  renderDiceButtons()
-  updateUI()
-}
+let rounds=[];
+let selected=[];
+let specialProbs=[];
+let predictions=[];
+let specialIntervals=[];
+let lastSpecialIndex=null;
+let correctCount=0;
 
-function renderDiceButtons(){
-  let div=document.getElementById("diceBtns")
-  div.innerHTML=""
+let bankroll=10000;
+let baseUnit=100;
+let peak=10000;
+let maxDrawdown=0;
+
+let chart=echarts.init(document.getElementById('chart'));
+
+function createButtons(){
+  const c=document.getElementById("diceButtons");
   for(let i=1;i<=6;i++){
-    for(let j=1;j<=6;j++){
-      for(let k=1;k<=6;k++){
-        let b=document.createElement("button")
-        b.innerText=`${i}${j}${k}`
-        b.onclick=()=>selectDice([i,j,k])
-        div.appendChild(b)
-      }
-    }
+    const b=document.createElement("button");
+    b.innerText=i;
+    b.className="dice-btn";
+    b.onclick=()=>selectDice(i);
+    c.appendChild(b);
   }
 }
+createButtons();
 
-let selected=null
-function selectDice(d){selected=d}
+function selectDice(n){
+  if(selected.length<3){
+    selected.push(n);
+    document.getElementById("selectedDice").innerText=selected.join(",");
+  }
+}
 
 function submitRound(){
-  if(!selected) return
-  processRound(selected)
-  selected=null
-}
+  if(selected.length!==3){alert("請選三顆");return;}
 
-function processRound(dice){
+  const [d1,d2,d3]=selected;
+  const sum=d1+d2+d3;
+  const isBao=(d1===d2&&d2===d3);
+  const is17=(sum===17);
+  const isSpecial=isBao||is17;
+  const size=sum>=11?"大":"小";
 
-  let sum=dice[0]+dice[1]+dice[2]
-  let isTriple=(dice[0]==dice[1] && dice[1]==dice[2]) || sum==17
-  let size=sum>=11?"big":"small"
+  if(predictions.length>0){
+    const lastPred=predictions[predictions.length-1];
+    const win=lastPred===size;
+    if(win) correctCount++;
+    updateBank(win);
+  }
 
-  history.push({dice,sum,isTriple,size})
-
-  if(isTriple){
-    if(lastSpecialIndex!=-1){
-      specialIntervals.unshift(history.length-1-lastSpecialIndex)
-      if(specialIntervals.length>10) specialIntervals.pop()
+  if(isSpecial){
+    if(lastSpecialIndex!==null){
+      specialIntervals.push(rounds.length-lastSpecialIndex);
     }
-    lastSpecialIndex=history.length-1
+    lastSpecialIndex=rounds.length;
   }
 
-  let signal=evaluateSignal()
-  let betSize=calcBet(signal)
+  rounds.push({d1,d2,d3,sum,isSpecial,size});
+  selected=[];
+  document.getElementById("selectedDice").innerText="";
+  calculate();
+}
 
-  let result="skip"
+function getGap(){
+  if(lastSpecialIndex===null) return rounds.length;
+  return rounds.length-1-lastSpecialIndex;
+}
 
-  if(lockRounds>0){
-    lockRounds--
-  }else if(signal!="no"){
-    if(currentPrediction==size){
-      bankroll+=betSize
-      wins++
-      consecutiveWin++
-      consecutiveLose=0
-      result="win"
-    }else{
-      bankroll-=betSize
-      losses++
-      consecutiveLose++
-      consecutiveWin=0
-      result="lose"
+function calculateSpecial(){
+  const gap=getGap();
+  let weight=1;
+
+  [1,3,5,10,14,16,18].forEach(p=>{
+    weight+=Math.exp(-((gap-p)**2)/8)*0.6;
+  });
+
+  if(gap>20) weight+=0.4;
+
+  let prob=BASE_SPECIAL*weight;
+  if(prob>0.12) prob=0.12;
+  if(prob<0.025) prob=0.025;
+
+  specialProbs.push((prob*100).toFixed(2));
+
+  let color="cold";
+  if(prob>0.08) color="hot";
+  else if(prob>0.05) color="warm";
+
+  const el=document.getElementById("specialProb");
+  el.className="prob "+color;
+  el.innerText=(prob*100).toFixed(2)+"%";
+
+  document.getElementById("gapInfo").innerText="目前間隔："+gap;
+  document.getElementById("gapHistory").innerText=
+    "歷史間隔："+specialIntervals.slice(-10).reverse().join(" → ");
+
+  drawChart();
+}
+
+function calculateBigSmall(){
+
+  let momentum=0;
+  const last5=rounds.slice(-5);
+  for(let i=1;i<last5.length;i++){
+    if(last5[i].size===last5[i-1].size) momentum++;
+  }
+
+  let score=0;
+
+  if(last5.length>=3){
+    const last=last5[last5.length-1].size;
+    if(momentum>=2){
+      score += last==="大"?0.18:-0.18;
     }
   }
 
-  if(consecutiveLose>=4){
-    lockRounds=20
+  const bigCount=rounds.slice(-20).filter(r=>r.size==="大").length;
+  const smallCount=rounds.slice(-20).filter(r=>r.size==="小").length;
+  score += (bigCount-smallCount)*0.01;
+
+  let bigProb=BASE_BIG+score;
+  let smallProb=BASE_BIG-score;
+
+  const prediction=bigProb>smallProb?"大":"小";
+  predictions.push(prediction);
+
+  document.getElementById("bigSmall").innerHTML=
+    `<div class="${prediction==="大"?"big":"small"}">
+     預測：${prediction}
+     </div>
+     <div>大 ${(bigProb*100).toFixed(1)}% | 小 ${(smallProb*100).toFixed(1)}%</div>`;
+
+  const total=predictions.length-1;
+  const acc=total>0?(correctCount/total*100).toFixed(1):0;
+  document.getElementById("accuracy").innerText=acc+"%";
+
+  updateTrendBoxes();
+}
+
+function updateTrendBoxes(){
+  const container=document.getElementById("trendBoxes");
+  container.innerHTML="";
+  let results=[];
+
+  for(let i=1;i<rounds.length;i++){
+    results.push(predictions[i-1]===rounds[i].size);
   }
 
-  if(bankroll>peak) peak=bankroll
+  const last20=results.slice(-20);
+  last20.forEach(win=>{
+    const box=document.createElement("div");
+    box.className=win?"win":"lose";
+    container.appendChild(box);
+  });
 
-  trend.unshift(result)
-  if(trend.length>40) trend.pop()
-
-  updateUI()
-}
-
-function evaluateSignal(){
-
-  if(history.length<5) return "no"
-
-  let last30=history.slice(-30)
-  let bigCount=last30.filter(x=>x.size=="big").length
-  let smallCount=30-bigCount
-
-  let momentum=0
-  let recent=history.slice(-5)
-  for(let i=1;i<recent.length;i++){
-    if(recent[i].size==recent[i-1].size) momentum++
-  }
-
-  let specialProb=calcSpecialProb()
-
-  let edge=Math.abs(bigCount-smallCount)/30
-
-  if(specialProb>0.07) return "strong"
-  if(edge>0.2) return "medium"
-  if(momentum>=3) return "weak"
-
-  return "no"
-}
-
-function calcSpecialProb(){
-  let base=0.0463
-  if(lastSpecialIndex==-1) return base
-  let gap=history.length-1-lastSpecialIndex
-  if([1,3,5,10,14,16,18].includes(gap)) base+=0.02
-  if(gap>20) base+=0.015
-  return base
-}
-
-function calcBet(level){
-  if(level=="strong") return bankroll*0.03
-  if(level=="medium") return bankroll*0.02
-  if(level=="weak") return bankroll*0.01
-  return 0
-}
-
-function updateUI(){
-
-  let special=calcSpecialProb()
-  let specialColor="green"
-  if(special>0.07) specialColor="red"
-  else if(special>0.055) specialColor="orange"
-
-  document.getElementById("specialProb").innerHTML=
-    `<span class="${specialColor}">${(special*100).toFixed(2)}%</span>`
-
-  let intervalText="目前間隔: "
-  if(lastSpecialIndex!=-1){
-    intervalText+=history.length-1-lastSpecialIndex
-  }else{
-    intervalText+="N/A"
-  }
-  intervalText+="<br>歷史: "+specialIntervals.join(" → ")
-  document.getElementById("intervalHistory").innerHTML=intervalText
-
-  let accuracy= wins+losses>0 ? (wins/(wins+losses)*100).toFixed(2):0
-
-  document.getElementById("tradePanel").innerHTML=
-    `資金: ${bankroll.toFixed(2)}<br>
-     回撤: ${((peak-bankroll)/peak*100).toFixed(2)}%<br>
-     連勝: ${consecutiveWin} / 連輸: ${consecutiveLose}<br>
-     鎖定局數: ${lockRounds}`
-
-  document.getElementById("accuracy").innerText=`準確率: ${accuracy}%`
-
-  let trendDiv=document.getElementById("trend")
-  trendDiv.innerHTML=""
-  trend.forEach(r=>{
-    let box=document.createElement("div")
-    box.classList.add("trendItem")
-    if(r=="win") box.classList.add("win")
-    else if(r=="lose") box.classList.add("lose")
-    else box.classList.add("skip")
-    trendDiv.appendChild(box)
-  })
-}
-
-function runSimulation(){
-
-  let rounds=parseInt(document.getElementById("simRounds").value)
-  let simBank=bankroll
-  let simPeak=simBank
-  let simWins=0
-  let simLoss=0
-
-  for(let i=0;i<rounds;i++){
-    let d=[rand(),rand(),rand()]
-    let sum=d[0]+d[1]+d[2]
-    let size=sum>=11?"big":"small"
-    let bet=simBank*0.02
-    if(Math.random()>0.5){
-      simBank+=bet
-      simWins++
-    }else{
-      simBank-=bet
-      simLoss++
+  if(last20.length>0){
+    let current=last20[last20.length-1];
+    let streak=1;
+    for(let i=last20.length-2;i>=0;i--){
+      if(last20[i]===current) streak++;
+      else break;
     }
-    if(simBank>simPeak) simPeak=simBank
+    document.getElementById("streakInfo").innerText=
+      (current?"連贏 ":"連輸 ")+streak+" 期";
   }
-
-  document.getElementById("simResult").innerHTML=
-    `回測資金: ${simBank.toFixed(2)}<br>
-     勝率: ${(simWins/(simWins+simLoss)*100).toFixed(2)}%<br>
-     最大回撤: ${((simPeak-simBank)/simPeak*100).toFixed(2)}%`
 }
 
-function rand(){return Math.floor(Math.random()*6)+1}
+function updateBank(win){
+
+  let bet=Math.floor(bankroll*0.02/baseUnit)*baseUnit;
+  if(bet<baseUnit) bet=baseUnit;
+
+  if(win) bankroll+=bet;
+  else bankroll-=bet;
+
+  if(bankroll>peak) peak=bankroll;
+
+  let drawdown=((peak-bankroll)/peak*100).toFixed(2);
+  if(drawdown>maxDrawdown) maxDrawdown=drawdown;
+
+  document.getElementById("bankrollInfo").innerText=
+    `資金：${bankroll} | 本注：${bet} | 最大回撤：${maxDrawdown}%`;
+}
+
+function calculate(){
+  calculateSpecial();
+  calculateBigSmall();
+
+  document.getElementById("history").innerText=
+    rounds.slice(-30)
+    .map(r=>`${r.d1}${r.d2}${r.d3}${r.isSpecial?'★':''}`)
+    .join(" , ");
+}
+
+function drawChart(){
+  chart.setOption({
+    xAxis:{type:'category',data:specialProbs.map((_,i)=>i+1)},
+    yAxis:{type:'value'},
+    series:[{data:specialProbs,type:'line',smooth:true}]
+  });
+}
 
 </script>
 </body>
