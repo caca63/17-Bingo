@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>三骰專業預測器 3.1</title>
+<title>三骰專業預測器 3.2</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
 body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
@@ -21,13 +21,15 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 .win{width:12px;height:12px;background:#22c55e;}
 .lose{width:12px;height:12px;background:#ef4444;}
 .stat{font-size:13px;color:#94a3b8;}
+.toggle-btn{margin:5px;padding:4px 8px;background:#334155;border:none;color:white;border-radius:6px;cursor:pointer;}
+.active{background:#22c55e;}
 </style>
 </head>
 <body>
 
 <div class="container">
 
-<h1>三骰專業預測器 3.1</h1>
+<h1>三骰專業預測器 3.2</h1>
 
 <div class="card">
 <h3>選擇三顆骰子</h3>
@@ -61,7 +63,9 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 </div>
 
 <div class="side card">
-<h3>命中趨勢(20)</h3>
+<h3>命中趨勢</h3>
+<button class="toggle-btn active" onclick="setTrend(20)" id="btn20">20</button>
+<button class="toggle-btn" onclick="setTrend(40)" id="btn40">40</button>
 <div id="trendBoxes" class="trend-box"></div>
 <div id="streakInfo" class="stat"></div>
 </div>
@@ -83,7 +87,7 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 <script>
 
 const BASE_SPECIAL=0.0417;
-const BASE_BIG=0.486;
+const BASE_BIG=0.5;
 
 let rounds=[];
 let selected=[];
@@ -92,11 +96,11 @@ let predictions=[];
 let specialIntervals=[];
 let lastSpecialIndex=null;
 let correctCount=0;
+let trendLength=20;
 
 let bankroll=10000;
 let baseUnit=100;
 let peak=10000;
-let maxDrawdown=0;
 
 let chart=echarts.init(document.getElementById('chart'));
 
@@ -130,8 +134,7 @@ function submitRound(){
   const size=sum>=11?"大":"小";
 
   if(predictions.length>0){
-    const lastPred=predictions[predictions.length-1];
-    const win=lastPred===size;
+    const win=predictions[predictions.length-1]===size;
     if(win) correctCount++;
     updateBank(win);
   }
@@ -155,24 +158,50 @@ function getGap(){
 }
 
 function calculateSpecial(){
+
   const gap=getGap();
   let weight=1;
 
+  // 週期尖峰
   [1,3,5,10,14,16,18].forEach(p=>{
-    weight+=Math.exp(-((gap-p)**2)/8)*0.6;
+    weight += Math.exp(-((gap-p)**2)/6)*1.1;
   });
 
-  if(gap>20) weight+=0.4;
+  // 長間隔拉升
+  if(gap>20){
+    weight += 0.6 + (gap-20)*0.05;
+  }
+
+  // 🔥 近三局結構壓縮加成（恢復）
+  const last3=rounds.slice(-3);
+  if(last3.length===3){
+    const freq=[0,0,0,0,0,0];
+    last3.forEach(r=>{
+      freq[r.d1-1]++;
+      freq[r.d2-1]++;
+      freq[r.d3-1]++;
+    });
+    const maxFreq=Math.max(...freq);
+    if(maxFreq>=3) weight+=0.6;       // 集中明顯
+    else if(maxFreq==2) weight+=0.3;  // 輕微集中
+  }
+
+  // 冷卻
+  let recentSpecial=rounds.slice(-5).filter(r=>r.isSpecial).length;
+  if(recentSpecial>=2){
+    weight*=0.8;
+  }
 
   let prob=BASE_SPECIAL*weight;
-  if(prob>0.12) prob=0.12;
+
+  if(prob>0.18) prob=0.18;
   if(prob<0.025) prob=0.025;
 
   specialProbs.push((prob*100).toFixed(2));
 
   let color="cold";
-  if(prob>0.08) color="hot";
-  else if(prob>0.05) color="warm";
+  if(prob>0.11) color="hot";
+  else if(prob>0.07) color="warm";
 
   const el=document.getElementById("specialProb");
   el.className="prob "+color;
@@ -187,24 +216,23 @@ function calculateSpecial(){
 
 function calculateBigSmall(){
 
-  let momentum=0;
+  let score=0;
   const last5=rounds.slice(-5);
-  for(let i=1;i<last5.length;i++){
-    if(last5[i].size===last5[i-1].size) momentum++;
+
+  // 連續動量
+  let streak=1;
+  for(let i=last5.length-1;i>0;i--){
+    if(last5[i].size===last5[i-1].size) streak++;
+    else break;
   }
 
-  let score=0;
-
-  if(last5.length>=3){
-    const last=last5[last5.length-1].size;
-    if(momentum>=2){
-      score += last==="大"?0.18:-0.18;
-    }
+  if(streak>=3){
+    score += last5[last5.length-1].size==="大"?0.25:-0.25;
   }
 
   const bigCount=rounds.slice(-20).filter(r=>r.size==="大").length;
   const smallCount=rounds.slice(-20).filter(r=>r.size==="小").length;
-  score += (bigCount-smallCount)*0.01;
+  score += (bigCount-smallCount)*0.015;
 
   let bigProb=BASE_BIG+score;
   let smallProb=BASE_BIG-score;
@@ -225,6 +253,14 @@ function calculateBigSmall(){
   updateTrendBoxes();
 }
 
+function setTrend(n){
+  trendLength=n;
+  document.getElementById("btn20").classList.remove("active");
+  document.getElementById("btn40").classList.remove("active");
+  document.getElementById("btn"+n).classList.add("active");
+  updateTrendBoxes();
+}
+
 function updateTrendBoxes(){
   const container=document.getElementById("trendBoxes");
   container.innerHTML="";
@@ -234,18 +270,18 @@ function updateTrendBoxes(){
     results.push(predictions[i-1]===rounds[i].size);
   }
 
-  const last20=results.slice(-20);
-  last20.forEach(win=>{
+  const last=results.slice(-trendLength);
+  last.forEach(win=>{
     const box=document.createElement("div");
     box.className=win?"win":"lose";
     container.appendChild(box);
   });
 
-  if(last20.length>0){
-    let current=last20[last20.length-1];
+  if(last.length>0){
+    let current=last[last.length-1];
     let streak=1;
-    for(let i=last20.length-2;i>=0;i--){
-      if(last20[i]===current) streak++;
+    for(let i=last.length-2;i>=0;i--){
+      if(last[i]===current) streak++;
       else break;
     }
     document.getElementById("streakInfo").innerText=
@@ -254,7 +290,6 @@ function updateTrendBoxes(){
 }
 
 function updateBank(win){
-
   let bet=Math.floor(bankroll*0.02/baseUnit)*baseUnit;
   if(bet<baseUnit) bet=baseUnit;
 
@@ -264,10 +299,9 @@ function updateBank(win){
   if(bankroll>peak) peak=bankroll;
 
   let drawdown=((peak-bankroll)/peak*100).toFixed(2);
-  if(drawdown>maxDrawdown) maxDrawdown=drawdown;
 
   document.getElementById("bankrollInfo").innerText=
-    `資金：${bankroll} | 本注：${bet} | 最大回撤：${maxDrawdown}%`;
+    `資金：${bankroll} | 本注：${bet} | 最大回撤：${drawdown}%`;
 }
 
 function calculate(){
@@ -289,5 +323,6 @@ function drawChart(){
 }
 
 </script>
+
 </body>
 </html>
