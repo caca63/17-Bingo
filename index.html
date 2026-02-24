@@ -2,10 +2,13 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Special Probability Model</title>
+<title>完整整合分析模型</title>
 <style>
 body{font-family:Arial;padding:20px}
+input{width:40px;padding:5px}
 button{padding:6px 12px;margin:5px}
+table{border-collapse:collapse;margin-top:15px}
+td,th{border:1px solid #ccc;padding:6px;text-align:center}
 .prob{font-size:22px;font-weight:bold}
 .hot{color:red}
 .warm{color:orange}
@@ -14,13 +17,33 @@ button{padding:6px 12px;margin:5px}
 </head>
 <body>
 
-<h2>特殊機率模型</h2>
+<h2>完整整合分析模型</h2>
 
-<button onclick="addRandom()">新增隨機一局</button>
+骰子：
+<input id="d1" type="number" min="1" max="6">
+<input id="d2" type="number" min="1" max="6">
+<input id="d3" type="number" min="1" max="6">
+<button onclick="addRound()">新增</button>
+<button onclick="addRandom()">隨機</button>
 
 <p>特殊機率：<span id="specialProb" class="prob cold">0%</span></p>
 <p id="gapInfo"></p>
-<p id="gapHistory"></p>
+<p id="structureInfo"></p>
+<p id="trendInfo"></p>
+
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>骰子</th>
+<th>總和</th>
+<th>大小</th>
+<th>結構</th>
+<th>特殊</th>
+</tr>
+</thead>
+<tbody id="history"></tbody>
+</table>
 
 <script>
 
@@ -30,9 +53,9 @@ let rounds=[];
 let specialIntervals=[];
 let specialProbs=[];
 
-// ==============================
-// 工具函式
-// ==============================
+// ===================
+// 工具
+// ===================
 
 function getGap(){
   for(let i=rounds.length-1;i>=0;i--){
@@ -43,20 +66,16 @@ function getGap(){
   return rounds.length;
 }
 
-function analyzeRound(r){
+function analyzeStructure(r){
   const arr=[r.d1,r.d2,r.d3];
   const count={};
   arr.forEach(n=>count[n]=(count[n]||0)+1);
   const values=Object.values(count);
 
-  if(values.includes(3)) return 3;
-  if(values.includes(2)) return 2;
-  return 1;
+  if(values.includes(3)) return "3同";
+  if(values.includes(2)) return "2同";
+  return "全異";
 }
-
-// ==============================
-// 大小趨勢模型（結構強度）
-// ==============================
 
 function analyzeBigSmallTrend(){
 
@@ -64,110 +83,102 @@ function analyzeBigSmallTrend(){
   if(last10.length<6) return 1;
 
   const seq=last10.map(r=>r.total>=11?1:0);
+  let score=1;
 
-  let trendScore=1;
-
-  // 最大連續壓制
-  let maxRun=1;
-  let run=1;
+  let maxRun=1, run=1;
   for(let i=1;i<seq.length;i++){
     if(seq[i]===seq[i-1]){
       run++;
       maxRun=Math.max(maxRun,run);
-    }else{
-      run=1;
-    }
+    }else run=1;
   }
 
-  if(maxRun>=4){
-    trendScore+=0.6;
-  }
+  if(maxRun>=4) score+=0.6;
 
-  // 高頻交錯
-  let flipCount=0;
+  let flip=0;
   for(let i=1;i<seq.length;i++){
-    if(seq[i]!==seq[i-1]) flipCount++;
+    if(seq[i]!==seq[i-1]) flip++;
   }
+  if(flip>=6) score+=0.45;
 
-  if(flipCount>=6){
-    trendScore+=0.45;
-  }
-
-  // 單邊比例
   const bigCount=seq.filter(x=>x===1).length;
   const ratio=bigCount/seq.length;
+  if(ratio>=0.7 || ratio<=0.3) score+=0.5;
 
-  if(ratio>=0.7 || ratio<=0.3){
-    trendScore+=0.5;
-  }
-
-  return trendScore;
+  return score;
 }
 
-// ==============================
+// ===================
 // 核心計算
-// ==============================
+// ===================
 
 function calculateSpecial(){
 
   const gap=getGap();
   let weight=1;
 
-  // ① 週期高斯
+  // 週期加成
   [1,3,5,10,14,16,18].forEach(p=>{
-    weight += Math.exp(-((gap-p)**2)/7)*0.7;
+    weight+=Math.exp(-((gap-p)**2)/7)*0.7;
   });
 
-  // ② 長間隔拉升
+  // 長間隔
   if(gap>20){
-    weight += 0.4 + (gap-20)*0.03;
+    weight+=0.4+(gap-20)*0.03;
   }
 
-  // 小gap抑制
   if(gap<3){
     weight*=0.75;
   }
 
-  // ③ 近三局結構
+  // 近三局結構
   const last3=rounds.slice(-3);
   let structureBonus=0;
 
   if(last3.length===3){
 
-    const types=last3.map(r=>analyzeRound(r));
+    const types=last3.map(r=>{
+      const s=analyzeStructure(r);
+      if(s==="3同") return 3;
+      if(s==="2同") return 2;
+      return 1;
+    });
 
-    const tripleCount=types.filter(t=>t===3).length;
-    const doubleCount=types.filter(t=>t===2).length;
+    const triple=types.filter(t=>t===3).length;
+    const double=types.filter(t=>t===2).length;
 
-    // 333
-    if(tripleCount===3){
+    if(triple===3){
       structureBonus+=1.1;
+      document.getElementById("structureInfo").innerText="近三局：333 結構";
     }
-    // 3321
-    else if(tripleCount===2 && doubleCount===1){
+    else if(triple===2 && double===1){
       structureBonus+=0.85;
+      document.getElementById("structureInfo").innerText="近三局：3321 結構";
     }
-    // 2221
-    else if(doubleCount===3){
+    else if(double===3){
       structureBonus+=0.6;
+      document.getElementById("structureInfo").innerText="近三局：2221 結構";
     }
-    else if(doubleCount===2){
-      structureBonus+=0.35;
+    else{
+      document.getElementById("structureInfo").innerText="近三局：無特殊結構";
     }
   }
 
   weight+=structureBonus;
 
-  // ④ 大小趨勢影響
-  weight*=analyzeBigSmallTrend();
+  // 大小趨勢
+  const trend=analyzeBigSmallTrend();
+  weight*=trend;
 
-  // ⑤ 過熱冷卻
+  document.getElementById("trendInfo").innerText="大小趨勢強度："+trend.toFixed(2);
+
+  // 冷卻
   const recentSpecial=rounds.slice(-6).filter(r=>r.isSpecial).length;
   if(recentSpecial>=2){
     weight*=0.78;
   }
 
-  // ⑥ 基準回歸
+  // 回歸
   const recent=specialProbs.slice(-10).map(p=>parseFloat(p));
   if(recent.length>=5){
     const avg=recent.reduce((a,b)=>a+b,0)/recent.length;
@@ -183,7 +194,6 @@ function calculateSpecial(){
 
   specialProbs.push((prob*100).toFixed(2));
 
-  // 顏色
   let color="cold";
   if(prob>0.115) color="hot";
   else if(prob>0.075) color="warm";
@@ -193,32 +203,65 @@ function calculateSpecial(){
   el.innerText=(prob*100).toFixed(2)+"%";
 
   document.getElementById("gapInfo").innerText="目前間隔："+gap;
-  document.getElementById("gapHistory").innerText=
-    "歷史間隔："+specialIntervals.slice(-10).reverse().join(" → ");
 }
 
-// ==============================
-// 測試用隨機產生
-// ==============================
+// ===================
+// 新增資料
+// ===================
+
+function addRound(){
+
+  const d1=parseInt(document.getElementById("d1").value);
+  const d2=parseInt(document.getElementById("d2").value);
+  const d3=parseInt(document.getElementById("d3").value);
+
+  if(!d1||!d2||!d3) return;
+
+  pushRound(d1,d2,d3);
+}
 
 function addRandom(){
+  pushRound(
+    Math.ceil(Math.random()*6),
+    Math.ceil(Math.random()*6),
+    Math.ceil(Math.random()*6)
+  );
+}
 
-  const d1=Math.ceil(Math.random()*6);
-  const d2=Math.ceil(Math.random()*6);
-  const d3=Math.ceil(Math.random()*6);
+function pushRound(d1,d2,d3){
 
   const total=d1+d2+d3;
-
-  const isSpecial=(d1===d2 && d2===d3);
+  const bigSmall=total>=11?"大":"小";
+  const structure=analyzeStructure({d1,d2,d3});
+  const isSpecial=(structure==="3同");
 
   rounds.push({d1,d2,d3,total,isSpecial});
 
   if(isSpecial){
-    const gap=getGap();
-    specialIntervals.push(gap);
+    specialIntervals.push(getGap());
   }
 
+  renderHistory();
   calculateSpecial();
+}
+
+function renderHistory(){
+
+  const tbody=document.getElementById("history");
+  tbody.innerHTML="";
+
+  rounds.slice().reverse().forEach((r,i)=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${rounds.length-i}</td>
+      <td>${r.d1}-${r.d2}-${r.d3}</td>
+      <td>${r.total}</td>
+      <td>${r.total>=11?"大":"小"}</td>
+      <td>${analyzeStructure(r)}</td>
+      <td>${r.isSpecial?"是":""}</td>
+    `;
+    tbody.appendChild(tr);
+  });
 }
 
 </script>
