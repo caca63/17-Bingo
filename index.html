@@ -2,101 +2,57 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>實戰預測系統 3.3 Ultimate</title>
-
+<title>實戰預測系統 3.3 完整終版</title>
 <style>
-body{
-    background:#0f0f0f;
-    color:#eee;
-    font-family:Arial;
-    margin:0;
-}
-.container{
-    display:flex;
-}
-.left{
-    width:60%;
-    padding:15px;
-}
-.right{
-    width:40%;
-    padding:15px;
-    background:#161616;
-    border-left:1px solid #333;
-}
-input,button{
-    padding:6px;
-    margin:4px;
-}
-.big{color:#ff7b00;}
-.small{color:#00c3ff;}
-.specialHigh{color:#ff2e63;font-weight:bold;}
-.specialMid{color:#ffd166;}
-.panel{
-    margin-bottom:20px;
-    padding:10px;
-    border:1px solid #333;
-}
-.history{
-    max-height:300px;
-    overflow-y:auto;
-    font-size:14px;
-}
+body { font-family: Arial; background:#111; color:#eee; padding:20px; }
+button { margin:3px; padding:6px 10px; }
+.big { color:#ff7b00; }
+.small { color:#00c3ff; }
+.specialHigh { color:#ff2e63; font-weight:bold; }
+.specialMid { color:#ffd166; }
+.history { max-height:300px; overflow-y:auto; margin-top:10px; }
 </style>
 </head>
-
 <body>
 
-<h2 style="padding:10px">實戰預測系統 3.3 Ultimate 穩定整合版</h2>
+<h2>實戰預測系統 3.3 Ultimate</h2>
 
-<div class="container">
-
-<div class="left">
-
-<div class="panel">
 初始籌碼:
 <input type="number" id="bankrollInput" value="10000">
 <button onclick="initBankroll()">設定</button>
-<br>
+<hr>
+
 輸入號碼:
 <input id="numInput">
 <button onclick="addNumber()">新增</button>
 <button onclick="clearAll()">清空</button>
-</div>
 
-<div class="panel">
-<h3>歷史紀錄</h3>
-<div id="history" class="history"></div>
-</div>
+<hr>
 
-</div>
-
-<div class="right">
-
-<div class="panel">
 <h3>預測資訊</h3>
 <div id="prediction"></div>
 <div id="plateType"></div>
 <div id="accuracy"></div>
 <div id="streak"></div>
 <div id="betInfo"></div>
-</div>
 
-<div class="panel">
+<hr>
+
 <h3>特殊分析</h3>
 <div id="specialProb"></div>
 <div id="specialGap"></div>
-</div>
 
-<div class="panel">
+<hr>
+
 <h3>命中趨勢</h3>
 <button onclick="trendLength=20;updateUI()">20</button>
 <button onclick="trendLength=40;updateUI()">40</button>
 <div id="hitTrend"></div>
-</div>
 
-</div>
-</div>
+<hr>
+
+<h3>歷史紀錄</h3>
+<div id="history" class="history"></div>
 
 <script>
 
@@ -110,195 +66,196 @@ let lastSpecialIndex=null;
 let specialGaps=[];
 
 function initBankroll(){
-    bankroll=parseInt(document.getElementById("bankrollInput").value);
-    updateUI();
+  bankroll=parseInt(document.getElementById("bankrollInput").value);
+  updateUI();
 }
 
 function clearAll(){
-    history=[];
-    predictionHistory=[];
-    resultHistory=[];
-    specialGaps=[];
-    lastSpecialIndex=null;
-    bankroll=parseInt(document.getElementById("bankrollInput").value);
-    updateUI();
+  history=[];
+  predictionHistory=[];
+  resultHistory=[];
+  specialGaps=[];
+  lastSpecialIndex=null;
+  bankroll=parseInt(document.getElementById("bankrollInput").value);
+  updateUI();
 }
 
 function addNumber(){
-    let val=document.getElementById("numInput").value;
-    if(!val) return;
+  let val=document.getElementById("numInput").value;
+  if(!val) return;
 
-    let isSpecial=val.includes("★");
-    val=val.replace("★","");
-    let sum=val.split("").reduce((a,b)=>a+parseInt(b),0);
-    let size=sum>=11?"大":"小";
+  let isSpecial=val.includes("★");
+  val=val.replace("★","");
+  let sum=val.split("").reduce((a,b)=>a+parseInt(b),0);
+  let size=sum>=11?"大":"小";
 
-    history.push({val,sum,size,isSpecial});
+  history.push({val,sum,size,isSpecial});
 
-    if(isSpecial){
-        if(lastSpecialIndex!==null){
-            specialGaps.unshift(history.length-1-lastSpecialIndex);
-            if(specialGaps.length>10) specialGaps.pop();
-        }
-        lastSpecialIndex=history.length-1;
+  if(isSpecial){
+    if(lastSpecialIndex!==null){
+      specialGaps.unshift(history.length-1-lastSpecialIndex);
+      if(specialGaps.length>10) specialGaps.pop();
     }
+    lastSpecialIndex=history.length-1;
+  }
 
-    evaluateResult();
-    predict();
-    document.getElementById("numInput").value="";
-    updateUI();
+  evaluateResult();
+  predict();
+
+  document.getElementById("numInput").value="";
+  updateUI();
 }
 
 function evaluateResult(){
-    if(predictionHistory.length===0) return;
+  if(predictionHistory.length===0) return;
 
-    let lastPred=predictionHistory[predictionHistory.length-1];
-    let actual=history[history.length-1].size;
-    let win= lastPred===actual;
-    resultHistory.push(win?1:0);
+  let lastPred=predictionHistory[predictionHistory.length-1];
+  let actual=history[history.length-1].size;
+  let win= lastPred===actual;
+  resultHistory.push(win?1:0);
 
-    let bet=calculateBet();
-    if(win) bankroll+=bet;
-    else bankroll-=bet;
+  let bet=calculateBet();
+  if(win) bankroll+=bet;
+  else bankroll-=bet;
 }
 
 function calculateBet(){
-    let streak=getStreak();
-    let plate=getPlateType();
-    let ratio=0.02;
+  let streak=getStreak();
+  let plate=getPlateType();
+  let ratio=0.02;
 
-    if(plate==="連莊盤") ratio=0.04;
-    if(plate==="震盪盤") ratio=0.015;
+  if(plate==="連莊盤") ratio=0.04;
+  if(plate==="震盪盤") ratio=0.015;
 
-    if(streak.loss>=3) ratio*=0.5;
-    if(streak.win>=3) ratio*=1.3;
+  if(streak.loss>=3) ratio*=0.5;
+  if(streak.win>=3) ratio*=1.3;
 
-    let bet=Math.floor((bankroll*ratio)/baseUnit)*baseUnit;
-    return bet<baseUnit?baseUnit:bet;
+  let bet=Math.floor((bankroll*ratio)/baseUnit)*baseUnit;
+  return bet<baseUnit?baseUnit:bet;
 }
 
 function getPlateType(){
-    if(history.length<8) return "混合盤";
+  if(history.length<8) return "混合盤";
 
-    let last8=history.slice(-8);
-    let changes=0;
-    for(let i=1;i<last8.length;i++){
-        if(last8[i].size!==last8[i-1].size) changes++;
-    }
+  let last8=history.slice(-8);
+  let changes=0;
+  for(let i=1;i<last8.length;i++){
+    if(last8[i].size!==last8[i-1].size) changes++;
+  }
 
-    if(changes>=5) return "震盪盤";
+  if(changes>=5) return "震盪盤";
 
-    let last3=history.slice(-3);
-    if(last3.every(x=>x.size===last3[0].size)) return "連莊盤";
+  let last3=history.slice(-3);
+  if(last3.every(x=>x.size===last3[0].size)) return "連莊盤";
 
-    return "混合盤";
+  return "混合盤";
 }
 
 function getMomentumScore(){
-    let score=0;
-    let recent=history.slice(-6);
+  let score=0;
+  let recent=history.slice(-6);
 
-    for(let i=1;i<recent.length;i++){
-        if(recent[i].size===recent[i-1].size) score+=1;
-        else score-=1;
-    }
+  for(let i=1;i<recent.length;i++){
+    if(recent[i].size===recent[i-1].size) score+=1;
+    else score-=1;
+  }
 
-    if(recent.slice(-3).every(x=>x.size==="大")) score+=2;
-    if(recent.slice(-3).every(x=>x.size==="小")) score-=2;
+  if(recent.slice(-3).every(x=>x.size==="大")) score+=2;
+  if(recent.slice(-3).every(x=>x.size==="小")) score-=2;
 
-    return score;
+  return score;
 }
 
 function getSpecialBoost(){
-    let boost=0;
+  let boost=0;
+  let last3=history.slice(-3);
 
-    let last3=history.slice(-3);
-    if(last3.length===3){
-        let digits=[];
-        last3.forEach(x=>digits.push(...x.val.split("")));
-        let map={};
-        digits.forEach(d=>map[d]=(map[d]||0)+1);
-        let max=Math.max(...Object.values(map));
+  if(last3.length===3){
+    let digits=[];
+    last3.forEach(x=>digits.push(...x.val.split("")));
+    let map={};
+    digits.forEach(d=>map[d]=(map[d]||0)+1);
+    let max=Math.max(...Object.values(map));
 
-        if(max>=6) boost+=3;
-        if(max===5) boost+=2;
-        if(last3.every(x=>x.val[0]===x.val[1] && x.val[1]===x.val[2])) boost+=4;
-    }
+    if(max>=6) boost+=3;
+    if(max===5) boost+=2;
+    if(last3.every(x=>x.val[0]===x.val[1] && x.val[1]===x.val[2])) boost+=4;
+  }
 
-    if(lastSpecialIndex!==null){
-        let gap=history.length-1-lastSpecialIndex;
-        if(gap>=20) boost+=2;
-        if(gap>=30) boost+=3;
-    }
+  if(lastSpecialIndex!==null){
+    let gap=history.length-1-lastSpecialIndex;
+    if(gap>=20) boost+=2;
+    if(gap>=30) boost+=3;
+  }
 
-    return boost;
+  return boost;
 }
 
 function predict(){
-    if(history.length<3) return;
+  if(history.length<3) return;
 
-    let plate=getPlateType();
-    let momentum=getMomentumScore();
-    let special=getSpecialBoost();
+  let plate=getPlateType();
+  let momentum=getMomentumScore();
+  let special=getSpecialBoost();
 
-    let score=momentum;
+  let score=momentum;
 
-    if(plate==="震盪盤") score*=-1;
-    if(plate==="連莊盤") score*=1.2;
+  if(plate==="震盪盤") score*=-1;
+  if(plate==="連莊盤") score*=1.2;
 
-    let finalScore=score + special*0.3;
+  let finalScore=score + special*0.3;
 
-    let prediction= finalScore>=0?"大":"小";
-    predictionHistory.push(prediction);
+  let prediction= finalScore>=0?"大":"小";
+  predictionHistory.push(prediction);
 }
 
 function getAccuracy(){
-    if(resultHistory.length===0) return 0;
-    return (resultHistory.reduce((a,b)=>a+b,0)/resultHistory.length*100).toFixed(1);
+  if(resultHistory.length===0) return 0;
+  return (resultHistory.reduce((a,b)=>a+b,0)/resultHistory.length*100).toFixed(1);
 }
 
 function getStreak(){
-    let win=0,loss=0;
-    for(let i=resultHistory.length-1;i>=0;i--){
-        if(resultHistory[i]===1){ if(loss>0) break; win++; }
-        else { if(win>0) break; loss++; }
-    }
-    return {win,loss};
+  let win=0,loss=0;
+  for(let i=resultHistory.length-1;i>=0;i--){
+    if(resultHistory[i]===1){ if(loss>0) break; win++; }
+    else { if(win>0) break; loss++; }
+  }
+  return {win,loss};
 }
 
 function updateUI(){
 
-    document.getElementById("prediction").innerHTML="預測: "+(predictionHistory.slice(-1)[0]||"-");
-    document.getElementById("plateType").innerHTML="盤型: "+getPlateType();
-    document.getElementById("accuracy").innerHTML="準確率: "+getAccuracy()+"%";
+  document.getElementById("prediction").innerHTML="預測: "+(predictionHistory.slice(-1)[0]||"-");
+  document.getElementById("plateType").innerHTML="盤型: "+getPlateType();
+  document.getElementById("accuracy").innerHTML="準確率: "+getAccuracy()+"%";
 
-    let streak=getStreak();
-    document.getElementById("streak").innerHTML="連勝:"+streak.win+" 連輸:"+streak.loss;
+  let streak=getStreak();
+  document.getElementById("streak").innerHTML="連勝:"+streak.win+" 連輸:"+streak.loss;
 
-    document.getElementById("betInfo").innerHTML="目前籌碼:"+bankroll+" 建議下注:"+calculateBet();
+  document.getElementById("betInfo").innerHTML="目前籌碼:"+bankroll+" 建議下注:"+calculateBet();
 
-    let sp=getSpecialBoost();
-    let cls="specialMid";
-    if(sp>=6) cls="specialHigh";
-    document.getElementById("specialProb").innerHTML="<span class='"+cls+"'>特殊加成:"+sp+"</span>";
+  let sp=getSpecialBoost();
+  let cls="specialMid";
+  if(sp>=6) cls="specialHigh";
+  document.getElementById("specialProb").innerHTML="<span class='"+cls+"'>特殊加成:"+sp+"</span>";
 
-    let gapText="目前間隔:";
-    if(lastSpecialIndex!==null){
-        gapText+=(history.length-1-lastSpecialIndex);
-    }
-    gapText+="<br>歷史10次:"+specialGaps.join(",");
-    document.getElementById("specialGap").innerHTML=gapText;
+  let gapText="目前間隔:";
+  if(lastSpecialIndex!==null){
+    gapText+=(history.length-1-lastSpecialIndex);
+  }
+  gapText+="<br>歷史10次:"+specialGaps.join(",");
+  document.getElementById("specialGap").innerHTML=gapText;
 
-    let trend=resultHistory.slice(-trendLength).map(x=>x?"✔":"✘").join("");
-    document.getElementById("hitTrend").innerHTML=trend;
+  let trend=resultHistory.slice(-trendLength).map(x=>x?"✔":"✘").join("");
+  document.getElementById("hitTrend").innerHTML=trend;
 
-    let histHTML="";
-    history.forEach(x=>{
-        let cls=x.size==="大"?"big":"small";
-        let star=x.isSpecial?"★":"";
-        histHTML+="<div class='"+cls+"'>"+x.val+star+" ("+x.sum+")</div>";
-    });
-    document.getElementById("history").innerHTML=histHTML;
+  let histHTML="";
+  history.forEach(x=>{
+    let cls=x.size==="大"?"big":"small";
+    let star=x.isSpecial?"★":"";
+    histHTML+="<div class='"+cls+"'>"+x.val+star+" ("+x.sum+")</div>";
+  });
+  document.getElementById("history").innerHTML=histHTML;
 }
 
 </script>
