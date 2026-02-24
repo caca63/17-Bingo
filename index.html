@@ -1,207 +1,192 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>三骰專業預測器 3.2</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<title>Special Probability Model</title>
 <style>
-body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
-.container{max-width:1300px;margin:auto;padding:20px;}
-.card{background:#1e293b;padding:20px;margin-top:20px;border-radius:12px;}
-.dice-btn{width:50px;height:50px;margin:5px;font-size:18px;border-radius:8px;border:none;cursor:pointer;background:#334155;color:white;}
-.prob{font-size:36px;font-weight:bold;}
-.cold{color:#38bdf8;}
-.warm{color:#facc15;}
-.hot{color:#f87171;}
-.big{color:#f87171;font-size:22px;}
-.small{color:#38bdf8;font-size:22px;}
-.flex{display:flex;gap:20px;}
-.side{width:260px;}
-.trend-box{display:flex;flex-wrap:wrap;gap:3px;margin-top:10px;}
-.win{width:12px;height:12px;background:#22c55e;}
-.lose{width:12px;height:12px;background:#ef4444;}
-.stat{font-size:13px;color:#94a3b8;}
-.toggle-btn{margin:5px;padding:4px 8px;background:#334155;border:none;color:white;border-radius:6px;cursor:pointer;}
-.active{background:#22c55e;}
+body{font-family:Arial;padding:20px}
+button{padding:6px 12px;margin:5px}
+.prob{font-size:22px;font-weight:bold}
+.hot{color:red}
+.warm{color:orange}
+.cold{color:#1e90ff}
 </style>
 </head>
 <body>
 
-<div class="container">
+<h2>特殊機率模型</h2>
 
-<h1>三骰專業預測器 3.2</h1>
+<button onclick="addRandom()">新增隨機一局</button>
 
-<div class="card">
-<h3>選擇三顆骰子</h3>
-<div id="diceButtons"></div>
-<div>已選：<span id="selectedDice"></span></div>
-<button onclick="submitRound()" style="margin-top:10px;padding:8px 15px;">確認新增</button>
-</div>
-
-<div class="flex">
-
-<div style="flex:1">
-
-<div class="card">
-<h3>特殊機率（豹子+17）</h3>
-<div id="specialProb" class="prob cold">4.17%</div>
-<div id="gapInfo"></div>
-<div id="gapHistory" class="stat"></div>
-</div>
-
-<div class="card">
-<h3>大小預測</h3>
-<div id="bigSmall"></div>
-<div class="stat">準確率：<span id="accuracy">0%</span></div>
-</div>
-
-<div class="card">
-<h3>資金管理</h3>
-<div id="bankrollInfo" class="stat"></div>
-</div>
-
-</div>
-
-<div class="side card">
-<h3>命中趨勢</h3>
-<button class="toggle-btn active" onclick="setTrend(20)" id="btn20">20</button>
-<button class="toggle-btn" onclick="setTrend(40)" id="btn40">40</button>
-<div id="trendBoxes" class="trend-box"></div>
-<div id="streakInfo" class="stat"></div>
-</div>
-
-</div>
-
-<div class="card">
-<h3>最近30局</h3>
-<div id="history"></div>
-</div>
-
-<div class="card">
-<h3>特殊機率走勢</h3>
-<div id="chart" style="height:300px;"></div>
-</div>
-
-</div>
+<p>特殊機率：<span id="specialProb" class="prob cold">0%</span></p>
+<p id="gapInfo"></p>
+<p id="gapHistory"></p>
 
 <script>
 
-const BASE_SPECIAL=0.0417;
-const BASE_BIG=0.5;
+const BASE_SPECIAL=0.05;
 
 let rounds=[];
-let selected=[];
-let specialProbs=[];
-let predictions=[];
 let specialIntervals=[];
-let lastSpecialIndex=null;
-let correctCount=0;
-let trendLength=20;
+let specialProbs=[];
 
-let bankroll=10000;
-let baseUnit=100;
-let peak=10000;
-
-let chart=echarts.init(document.getElementById('chart'));
-
-function createButtons(){
-  const c=document.getElementById("diceButtons");
-  for(let i=1;i<=6;i++){
-    const b=document.createElement("button");
-    b.innerText=i;
-    b.className="dice-btn";
-    b.onclick=()=>selectDice(i);
-    c.appendChild(b);
-  }
-}
-createButtons();
-
-function selectDice(n){
-  if(selected.length<3){
-    selected.push(n);
-    document.getElementById("selectedDice").innerText=selected.join(",");
-  }
-}
-
-function submitRound(){
-  if(selected.length!==3){alert("請選三顆");return;}
-
-  const [d1,d2,d3]=selected;
-  const sum=d1+d2+d3;
-  const isBao=(d1===d2&&d2===d3);
-  const is17=(sum===17);
-  const isSpecial=isBao||is17;
-  const size=sum>=11?"大":"小";
-
-  if(predictions.length>0){
-    const win=predictions[predictions.length-1]===size;
-    if(win) correctCount++;
-    updateBank(win);
-  }
-
-  if(isSpecial){
-    if(lastSpecialIndex!==null){
-      specialIntervals.push(rounds.length-lastSpecialIndex);
-    }
-    lastSpecialIndex=rounds.length;
-  }
-
-  rounds.push({d1,d2,d3,sum,isSpecial,size});
-  selected=[];
-  document.getElementById("selectedDice").innerText="";
-  calculate();
-}
+// ==============================
+// 工具函式
+// ==============================
 
 function getGap(){
-  if(lastSpecialIndex===null) return rounds.length;
-  return rounds.length-1-lastSpecialIndex;
+  for(let i=rounds.length-1;i>=0;i--){
+    if(rounds[i].isSpecial){
+      return rounds.length-1-i;
+    }
+  }
+  return rounds.length;
 }
+
+function analyzeRound(r){
+  const arr=[r.d1,r.d2,r.d3];
+  const count={};
+  arr.forEach(n=>count[n]=(count[n]||0)+1);
+  const values=Object.values(count);
+
+  if(values.includes(3)) return 3;
+  if(values.includes(2)) return 2;
+  return 1;
+}
+
+// ==============================
+// 大小趨勢模型（結構強度）
+// ==============================
+
+function analyzeBigSmallTrend(){
+
+  const last10=rounds.slice(-10);
+  if(last10.length<6) return 1;
+
+  const seq=last10.map(r=>r.total>=11?1:0);
+
+  let trendScore=1;
+
+  // 最大連續壓制
+  let maxRun=1;
+  let run=1;
+  for(let i=1;i<seq.length;i++){
+    if(seq[i]===seq[i-1]){
+      run++;
+      maxRun=Math.max(maxRun,run);
+    }else{
+      run=1;
+    }
+  }
+
+  if(maxRun>=4){
+    trendScore+=0.6;
+  }
+
+  // 高頻交錯
+  let flipCount=0;
+  for(let i=1;i<seq.length;i++){
+    if(seq[i]!==seq[i-1]) flipCount++;
+  }
+
+  if(flipCount>=6){
+    trendScore+=0.45;
+  }
+
+  // 單邊比例
+  const bigCount=seq.filter(x=>x===1).length;
+  const ratio=bigCount/seq.length;
+
+  if(ratio>=0.7 || ratio<=0.3){
+    trendScore+=0.5;
+  }
+
+  return trendScore;
+}
+
+// ==============================
+// 核心計算
+// ==============================
 
 function calculateSpecial(){
 
   const gap=getGap();
   let weight=1;
 
-  // 週期尖峰
+  // ① 週期高斯
   [1,3,5,10,14,16,18].forEach(p=>{
-    weight += Math.exp(-((gap-p)**2)/6)*1.1;
+    weight += Math.exp(-((gap-p)**2)/7)*0.7;
   });
 
-  // 長間隔拉升
+  // ② 長間隔拉升
   if(gap>20){
-    weight += 0.6 + (gap-20)*0.05;
+    weight += 0.4 + (gap-20)*0.03;
   }
 
-  // 🔥 近三局結構壓縮加成（恢復）
+  // 小gap抑制
+  if(gap<3){
+    weight*=0.75;
+  }
+
+  // ③ 近三局結構
   const last3=rounds.slice(-3);
+  let structureBonus=0;
+
   if(last3.length===3){
-    const freq=[0,0,0,0,0,0];
-    last3.forEach(r=>{
-      freq[r.d1-1]++;
-      freq[r.d2-1]++;
-      freq[r.d3-1]++;
-    });
-    const maxFreq=Math.max(...freq);
-    if(maxFreq>=3) weight+=0.6;       // 集中明顯
-    else if(maxFreq==2) weight+=0.3;  // 輕微集中
+
+    const types=last3.map(r=>analyzeRound(r));
+
+    const tripleCount=types.filter(t=>t===3).length;
+    const doubleCount=types.filter(t=>t===2).length;
+
+    // 333
+    if(tripleCount===3){
+      structureBonus+=1.1;
+    }
+    // 3321
+    else if(tripleCount===2 && doubleCount===1){
+      structureBonus+=0.85;
+    }
+    // 2221
+    else if(doubleCount===3){
+      structureBonus+=0.6;
+    }
+    else if(doubleCount===2){
+      structureBonus+=0.35;
+    }
   }
 
-  // 冷卻
-  let recentSpecial=rounds.slice(-5).filter(r=>r.isSpecial).length;
+  weight+=structureBonus;
+
+  // ④ 大小趨勢影響
+  weight*=analyzeBigSmallTrend();
+
+  // ⑤ 過熱冷卻
+  const recentSpecial=rounds.slice(-6).filter(r=>r.isSpecial).length;
   if(recentSpecial>=2){
-    weight*=0.8;
+    weight*=0.78;
+  }
+
+  // ⑥ 基準回歸
+  const recent=specialProbs.slice(-10).map(p=>parseFloat(p));
+  if(recent.length>=5){
+    const avg=recent.reduce((a,b)=>a+b,0)/recent.length;
+    if(avg>9){
+      weight*=0.88;
+    }
   }
 
   let prob=BASE_SPECIAL*weight;
 
-  if(prob>0.18) prob=0.18;
+  if(prob>0.16) prob=0.16;
   if(prob<0.025) prob=0.025;
 
   specialProbs.push((prob*100).toFixed(2));
 
+  // 顏色
   let color="cold";
-  if(prob>0.11) color="hot";
-  else if(prob>0.07) color="warm";
+  if(prob>0.115) color="hot";
+  else if(prob>0.075) color="warm";
 
   const el=document.getElementById("specialProb");
   el.className="prob "+color;
@@ -210,119 +195,32 @@ function calculateSpecial(){
   document.getElementById("gapInfo").innerText="目前間隔："+gap;
   document.getElementById("gapHistory").innerText=
     "歷史間隔："+specialIntervals.slice(-10).reverse().join(" → ");
-
-  drawChart();
 }
 
-function calculateBigSmall(){
+// ==============================
+// 測試用隨機產生
+// ==============================
 
-  let score=0;
-  const last5=rounds.slice(-5);
+function addRandom(){
 
-  // 連續動量
-  let streak=1;
-  for(let i=last5.length-1;i>0;i--){
-    if(last5[i].size===last5[i-1].size) streak++;
-    else break;
+  const d1=Math.ceil(Math.random()*6);
+  const d2=Math.ceil(Math.random()*6);
+  const d3=Math.ceil(Math.random()*6);
+
+  const total=d1+d2+d3;
+
+  const isSpecial=(d1===d2 && d2===d3);
+
+  rounds.push({d1,d2,d3,total,isSpecial});
+
+  if(isSpecial){
+    const gap=getGap();
+    specialIntervals.push(gap);
   }
 
-  if(streak>=3){
-    score += last5[last5.length-1].size==="大"?0.25:-0.25;
-  }
-
-  const bigCount=rounds.slice(-20).filter(r=>r.size==="大").length;
-  const smallCount=rounds.slice(-20).filter(r=>r.size==="小").length;
-  score += (bigCount-smallCount)*0.015;
-
-  let bigProb=BASE_BIG+score;
-  let smallProb=BASE_BIG-score;
-
-  const prediction=bigProb>smallProb?"大":"小";
-  predictions.push(prediction);
-
-  document.getElementById("bigSmall").innerHTML=
-    `<div class="${prediction==="大"?"big":"small"}">
-     預測：${prediction}
-     </div>
-     <div>大 ${(bigProb*100).toFixed(1)}% | 小 ${(smallProb*100).toFixed(1)}%</div>`;
-
-  const total=predictions.length-1;
-  const acc=total>0?(correctCount/total*100).toFixed(1):0;
-  document.getElementById("accuracy").innerText=acc+"%";
-
-  updateTrendBoxes();
-}
-
-function setTrend(n){
-  trendLength=n;
-  document.getElementById("btn20").classList.remove("active");
-  document.getElementById("btn40").classList.remove("active");
-  document.getElementById("btn"+n).classList.add("active");
-  updateTrendBoxes();
-}
-
-function updateTrendBoxes(){
-  const container=document.getElementById("trendBoxes");
-  container.innerHTML="";
-  let results=[];
-
-  for(let i=1;i<rounds.length;i++){
-    results.push(predictions[i-1]===rounds[i].size);
-  }
-
-  const last=results.slice(-trendLength);
-  last.forEach(win=>{
-    const box=document.createElement("div");
-    box.className=win?"win":"lose";
-    container.appendChild(box);
-  });
-
-  if(last.length>0){
-    let current=last[last.length-1];
-    let streak=1;
-    for(let i=last.length-2;i>=0;i--){
-      if(last[i]===current) streak++;
-      else break;
-    }
-    document.getElementById("streakInfo").innerText=
-      (current?"連贏 ":"連輸 ")+streak+" 期";
-  }
-}
-
-function updateBank(win){
-  let bet=Math.floor(bankroll*0.02/baseUnit)*baseUnit;
-  if(bet<baseUnit) bet=baseUnit;
-
-  if(win) bankroll+=bet;
-  else bankroll-=bet;
-
-  if(bankroll>peak) peak=bankroll;
-
-  let drawdown=((peak-bankroll)/peak*100).toFixed(2);
-
-  document.getElementById("bankrollInfo").innerText=
-    `資金：${bankroll} | 本注：${bet} | 最大回撤：${drawdown}%`;
-}
-
-function calculate(){
   calculateSpecial();
-  calculateBigSmall();
-
-  document.getElementById("history").innerText=
-    rounds.slice(-30)
-    .map(r=>`${r.d1}${r.d2}${r.d3}${r.isSpecial?'★':''}`)
-    .join(" , ");
-}
-
-function drawChart(){
-  chart.setOption({
-    xAxis:{type:'category',data:specialProbs.map((_,i)=>i+1)},
-    yAxis:{type:'value'},
-    series:[{data:specialProbs,type:'line',smooth:true}]
-  });
 }
 
 </script>
-
 </body>
 </html>
