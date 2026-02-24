@@ -1,263 +1,283 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>實戰預測系統 3.3 完整終版</title>
-<style>
-body { font-family: Arial; background:#111; color:#eee; padding:20px; }
-button { margin:3px; padding:6px 10px; }
-.big { color:#ff7b00; }
-.small { color:#00c3ff; }
-.specialHigh { color:#ff2e63; font-weight:bold; }
-.specialMid { color:#ffd166; }
-.history { max-height:300px; overflow-y:auto; margin-top:10px; }
-</style>
-</head>
-<body>
-
-<h2>實戰預測系統 3.3 Ultimate</h2>
-
-初始籌碼:
-<input type="number" id="bankrollInput" value="10000">
-<button onclick="initBankroll()">設定</button>
-<hr>
-
-輸入號碼:
-<input id="numInput">
-<button onclick="addNumber()">新增</button>
-<button onclick="clearAll()">清空</button>
-
-<hr>
-
-<h3>預測資訊</h3>
-<div id="prediction"></div>
-<div id="plateType"></div>
-<div id="accuracy"></div>
-<div id="streak"></div>
-<div id="betInfo"></div>
-
-<hr>
-
-<h3>特殊分析</h3>
-<div id="specialProb"></div>
-<div id="specialGap"></div>
-
-<hr>
-
-<h3>命中趨勢</h3>
-<button onclick="trendLength=20;updateUI()">20</button>
-<button onclick="trendLength=40;updateUI()">40</button>
-<div id="hitTrend"></div>
-
-<hr>
-
-<h3>歷史紀錄</h3>
-<div id="history" class="history"></div>
-
 <script>
 
-let history=[];
-let predictionHistory=[];
-let resultHistory=[];
+const BASE_SPECIAL=0.0417;
+const BASE_BIG=0.5;
+
+let rounds=[];
+let selected=[];
+let specialProbs=[];
+let predictions=[];
+let specialIntervals=[];
+let lastSpecialIndex=null;
+let correctCount=0;
+let trendLength=20;
+
 let bankroll=10000;
 let baseUnit=100;
-let trendLength=40;
-let lastSpecialIndex=null;
-let specialGaps=[];
+let peak=10000;
 
-function initBankroll(){
-  bankroll=parseInt(document.getElementById("bankrollInput").value);
-  updateUI();
+let chart=echarts.init(document.getElementById('chart'));
+
+function createButtons(){
+  const c=document.getElementById("diceButtons");
+  for(let i=1;i<=6;i++){
+    const b=document.createElement("button");
+    b.innerText=i;
+    b.className="dice-btn";
+    b.onclick=()=>selectDice(i);
+    c.appendChild(b);
+  }
+}
+createButtons();
+
+function selectDice(n){
+  if(selected.length<3){
+    selected.push(n);
+    document.getElementById("selectedDice").innerText=selected.join(",");
+  }
 }
 
-function clearAll(){
-  history=[];
-  predictionHistory=[];
-  resultHistory=[];
-  specialGaps=[];
-  lastSpecialIndex=null;
-  bankroll=parseInt(document.getElementById("bankrollInput").value);
-  updateUI();
-}
+function submitRound(){
+  if(selected.length!==3){alert("請選三顆");return;}
 
-function addNumber(){
-  let val=document.getElementById("numInput").value;
-  if(!val) return;
+  const [d1,d2,d3]=selected;
+  const sum=d1+d2+d3;
+  const isBao=(d1===d2&&d2===d3);
+  const is17=(sum===17);
+  const isSpecial=isBao||is17;
+  const size=sum>=11?"大":"小";
 
-  let isSpecial=val.includes("★");
-  val=val.replace("★","");
-  let sum=val.split("").reduce((a,b)=>a+parseInt(b),0);
-  let size=sum>=11?"大":"小";
-
-  history.push({val,sum,size,isSpecial});
+  if(predictions.length>0){
+    const win=predictions[predictions.length-1]===size;
+    if(win) correctCount++;
+    updateBank(win);
+  }
 
   if(isSpecial){
     if(lastSpecialIndex!==null){
-      specialGaps.unshift(history.length-1-lastSpecialIndex);
-      if(specialGaps.length>10) specialGaps.pop();
+      specialIntervals.push(rounds.length-lastSpecialIndex);
     }
-    lastSpecialIndex=history.length-1;
+    lastSpecialIndex=rounds.length;
   }
 
-  evaluateResult();
-  predict();
-
-  document.getElementById("numInput").value="";
-  updateUI();
+  rounds.push({d1,d2,d3,sum,isSpecial,size});
+  selected=[];
+  document.getElementById("selectedDice").innerText="";
+  calculate();
 }
 
-function evaluateResult(){
-  if(predictionHistory.length===0) return;
+function getGap(){
+  if(lastSpecialIndex===null) return rounds.length;
+  return rounds.length-1-lastSpecialIndex;
+}
 
-  let lastPred=predictionHistory[predictionHistory.length-1];
-  let actual=history[history.length-1].size;
-  let win= lastPred===actual;
-  resultHistory.push(win?1:0);
+/* ===========================
+   大小盤型判斷 + 雙向動量
+=========================== */
 
-  let bet=calculateBet();
+function calculateBigSmall(){
+
+  let score=0;
+  const last10=rounds.slice(-10);
+
+  if(last10.length>=6){
+
+    const seq=last10.map(r=>r.size==="大"?1:0);
+
+    // 最大連續
+    let maxRun=1, run=1;
+    for(let i=1;i<seq.length;i++){
+      if(seq[i]===seq[i-1]){ run++; maxRun=Math.max(maxRun,run); }
+      else run=1;
+    }
+
+    if(maxRun>=4){
+      score += seq[seq.length-1]===1?0.35:-0.35;
+    }
+
+    // 震盪盤偵測
+    let flip=0;
+    for(let i=1;i<seq.length;i++){
+      if(seq[i]!==seq[i-1]) flip++;
+    }
+
+    if(flip>=6){
+      // 延續交替
+      score += seq[seq.length-1]===1?-0.28:0.28;
+    }
+
+    // 結構比例偏移
+    const bigCount=seq.filter(x=>x===1).length;
+    score += (bigCount-seq.length/2)*0.035;
+  }
+
+  let bigProb=BASE_BIG+score;
+
+  if(bigProb>0.78) bigProb=0.78;
+  if(bigProb<0.22) bigProb=0.22;
+
+  let smallProb=1-bigProb;
+
+  const prediction=bigProb>smallProb?"大":"小";
+  predictions.push(prediction);
+
+  document.getElementById("bigSmall").innerHTML=
+    `<div class="${prediction==="大"?"big":"small"}">
+     預測：${prediction}
+     </div>
+     <div>大 ${(bigProb*100).toFixed(1)}% | 小 ${(smallProb*100).toFixed(1)}%</div>`;
+
+  const total=predictions.length-1;
+  const acc=total>0?(correctCount/total*100).toFixed(1):0;
+  document.getElementById("accuracy").innerText=acc+"%";
+
+  updateTrendBoxes();
+}
+
+/* ===========================
+   特殊機率強化版
+=========================== */
+
+function calculateSpecial(){
+
+  const gap=getGap();
+  let weight=1;
+
+  // 週期尖峰
+  [1,3,5,10,14,16,18].forEach(p=>{
+    weight+=Math.exp(-((gap-p)**2)/7)*0.75;
+  });
+
+  if(gap>20){
+    weight+=0.4+(gap-20)*0.03;
+  }
+
+  if(gap<3) weight*=0.8;
+
+  /* ---- 近三局 2221 / 3321 / 333 強化 ---- */
+
+  const last3=rounds.slice(-3);
+  if(last3.length===3){
+
+    const typeArr=last3.map(r=>{
+      const map={};
+      [r.d1,r.d2,r.d3].forEach(n=>map[n]=(map[n]||0)+1);
+      const vals=Object.values(map);
+      if(vals.includes(3)) return 3;
+      if(vals.includes(2)) return 2;
+      return 1;
+    });
+
+    const triple=typeArr.filter(x=>x===3).length;
+    const dbl=typeArr.filter(x=>x===2).length;
+
+    if(triple===3) weight+=1.2;          // 333
+    else if(triple===2&&dbl===1) weight+=0.95; // 3321
+    else if(dbl===3) weight+=0.75;       // 2221
+    else if(dbl===2) weight+=0.4;
+  }
+
+  // 過熱弱化
+  const recent=specialProbs.slice(-8).map(p=>parseFloat(p));
+  if(recent.length>=5){
+    const avg=recent.reduce((a,b)=>a+b,0)/recent.length;
+    if(avg>9) weight*=0.85;
+  }
+
+  const recentSpecial=rounds.slice(-6).filter(r=>r.isSpecial).length;
+  if(recentSpecial>=2) weight*=0.8;
+
+  let prob=BASE_SPECIAL*weight;
+
+  if(prob>0.165) prob=0.165;
+  if(prob<0.025) prob=0.025;
+
+  specialProbs.push((prob*100).toFixed(2));
+
+  let color="cold";
+  if(prob>0.115) color="hot";
+  else if(prob>0.075) color="warm";
+
+  const el=document.getElementById("specialProb");
+  el.className="prob "+color;
+  el.innerText=(prob*100).toFixed(2)+"%";
+
+  document.getElementById("gapInfo").innerText="目前間隔："+gap;
+  document.getElementById("gapHistory").innerText=
+    "歷史間隔："+specialIntervals.slice(-10).reverse().join(" → ");
+
+  drawChart();
+}
+
+/* =========================== */
+
+function calculate(){
+  calculateSpecial();
+  calculateBigSmall();
+
+  document.getElementById("history").innerText=
+    rounds.slice(-30)
+    .map(r=>`${r.d1}${r.d2}${r.d3}${r.isSpecial?'★':''}`)
+    .join(" , ");
+}
+
+function updateBank(win){
+  let bet=Math.floor(bankroll*0.02/baseUnit)*baseUnit;
+  if(bet<baseUnit) bet=baseUnit;
+
   if(win) bankroll+=bet;
   else bankroll-=bet;
+
+  if(bankroll>peak) peak=bankroll;
+
+  let drawdown=((peak-bankroll)/peak*100).toFixed(2);
+
+  document.getElementById("bankrollInfo").innerText=
+    `資金：${bankroll} | 本注：${bet} | 最大回撤：${drawdown}%`;
 }
 
-function calculateBet(){
-  let streak=getStreak();
-  let plate=getPlateType();
-  let ratio=0.02;
-
-  if(plate==="連莊盤") ratio=0.04;
-  if(plate==="震盪盤") ratio=0.015;
-
-  if(streak.loss>=3) ratio*=0.5;
-  if(streak.win>=3) ratio*=1.3;
-
-  let bet=Math.floor((bankroll*ratio)/baseUnit)*baseUnit;
-  return bet<baseUnit?baseUnit:bet;
+function setTrend(n){
+  trendLength=n;
+  document.getElementById("btn20").classList.remove("active");
+  document.getElementById("btn40").classList.remove("active");
+  document.getElementById("btn"+n).classList.add("active");
+  updateTrendBoxes();
 }
 
-function getPlateType(){
-  if(history.length<8) return "混合盤";
+function updateTrendBoxes(){
+  const container=document.getElementById("trendBoxes");
+  container.innerHTML="";
+  let results=[];
 
-  let last8=history.slice(-8);
-  let changes=0;
-  for(let i=1;i<last8.length;i++){
-    if(last8[i].size!==last8[i-1].size) changes++;
+  for(let i=1;i<rounds.length;i++){
+    results.push(predictions[i-1]===rounds[i].size);
   }
 
-  if(changes>=5) return "震盪盤";
-
-  let last3=history.slice(-3);
-  if(last3.every(x=>x.size===last3[0].size)) return "連莊盤";
-
-  return "混合盤";
-}
-
-function getMomentumScore(){
-  let score=0;
-  let recent=history.slice(-6);
-
-  for(let i=1;i<recent.length;i++){
-    if(recent[i].size===recent[i-1].size) score+=1;
-    else score-=1;
-  }
-
-  if(recent.slice(-3).every(x=>x.size==="大")) score+=2;
-  if(recent.slice(-3).every(x=>x.size==="小")) score-=2;
-
-  return score;
-}
-
-function getSpecialBoost(){
-  let boost=0;
-  let last3=history.slice(-3);
-
-  if(last3.length===3){
-    let digits=[];
-    last3.forEach(x=>digits.push(...x.val.split("")));
-    let map={};
-    digits.forEach(d=>map[d]=(map[d]||0)+1);
-    let max=Math.max(...Object.values(map));
-
-    if(max>=6) boost+=3;
-    if(max===5) boost+=2;
-    if(last3.every(x=>x.val[0]===x.val[1] && x.val[1]===x.val[2])) boost+=4;
-  }
-
-  if(lastSpecialIndex!==null){
-    let gap=history.length-1-lastSpecialIndex;
-    if(gap>=20) boost+=2;
-    if(gap>=30) boost+=3;
-  }
-
-  return boost;
-}
-
-function predict(){
-  if(history.length<3) return;
-
-  let plate=getPlateType();
-  let momentum=getMomentumScore();
-  let special=getSpecialBoost();
-
-  let score=momentum;
-
-  if(plate==="震盪盤") score*=-1;
-  if(plate==="連莊盤") score*=1.2;
-
-  let finalScore=score + special*0.3;
-
-  let prediction= finalScore>=0?"大":"小";
-  predictionHistory.push(prediction);
-}
-
-function getAccuracy(){
-  if(resultHistory.length===0) return 0;
-  return (resultHistory.reduce((a,b)=>a+b,0)/resultHistory.length*100).toFixed(1);
-}
-
-function getStreak(){
-  let win=0,loss=0;
-  for(let i=resultHistory.length-1;i>=0;i--){
-    if(resultHistory[i]===1){ if(loss>0) break; win++; }
-    else { if(win>0) break; loss++; }
-  }
-  return {win,loss};
-}
-
-function updateUI(){
-
-  document.getElementById("prediction").innerHTML="預測: "+(predictionHistory.slice(-1)[0]||"-");
-  document.getElementById("plateType").innerHTML="盤型: "+getPlateType();
-  document.getElementById("accuracy").innerHTML="準確率: "+getAccuracy()+"%";
-
-  let streak=getStreak();
-  document.getElementById("streak").innerHTML="連勝:"+streak.win+" 連輸:"+streak.loss;
-
-  document.getElementById("betInfo").innerHTML="目前籌碼:"+bankroll+" 建議下注:"+calculateBet();
-
-  let sp=getSpecialBoost();
-  let cls="specialMid";
-  if(sp>=6) cls="specialHigh";
-  document.getElementById("specialProb").innerHTML="<span class='"+cls+"'>特殊加成:"+sp+"</span>";
-
-  let gapText="目前間隔:";
-  if(lastSpecialIndex!==null){
-    gapText+=(history.length-1-lastSpecialIndex);
-  }
-  gapText+="<br>歷史10次:"+specialGaps.join(",");
-  document.getElementById("specialGap").innerHTML=gapText;
-
-  let trend=resultHistory.slice(-trendLength).map(x=>x?"✔":"✘").join("");
-  document.getElementById("hitTrend").innerHTML=trend;
-
-  let histHTML="";
-  history.forEach(x=>{
-    let cls=x.size==="大"?"big":"small";
-    let star=x.isSpecial?"★":"";
-    histHTML+="<div class='"+cls+"'>"+x.val+star+" ("+x.sum+")</div>";
+  const last=results.slice(-trendLength);
+  last.forEach(win=>{
+    const box=document.createElement("div");
+    box.className=win?"win":"lose";
+    container.appendChild(box);
   });
-  document.getElementById("history").innerHTML=histHTML;
+
+  if(last.length>0){
+    let current=last[last.length-1];
+    let streak=1;
+    for(let i=last.length-2;i>=0;i--){
+      if(last[i]===current) streak++;
+      else break;
+    }
+    document.getElementById("streakInfo").innerText=
+      (current?"連贏 ":"連輸 ")+streak+" 期";
+  }
+}
+
+function drawChart(){
+  chart.setOption({
+    xAxis:{type:'category',data:specialProbs.map((_,i)=>i+1)},
+    yAxis:{type:'value'},
+    series:[{data:specialProbs,type:'line',smooth:true}]
+  });
 }
 
 </script>
-</body>
-</html>
