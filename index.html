@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>九骰預測系統 v4.2 穩定優化版</title>
+<title>九骰預測系統 v4.2 穩定修正版</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
 body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
@@ -34,7 +34,6 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 </div>
 
 <div class="flex">
-
 <div style="flex:1">
 
 <div class="card">
@@ -70,7 +69,6 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 <div id="statsAggr" class="stat"></div>
 
 </div>
-
 </div>
 
 <div class="card">
@@ -93,6 +91,7 @@ let predictionsCons=[],predictionsAggr=[];
 let specialProbs=[],specialIntervals=[];
 let lastSpecialIndex=null;
 let trendLength=20;
+
 let chart=echarts.init(document.getElementById('chart'));
 
 /* 建立骰子 */
@@ -140,12 +139,12 @@ function deleteLast(){
   rebuildAll();
 }
 
-/* ===== 核心重建 ===== */
-
+/* 重建 */
 function rebuildAll(){
   predictionsCons=[];
   predictionsAggr=[];
   specialProbs=[];
+  specialIntervals=[];
   lastSpecialIndex=null;
 
   for(let i=0;i<rounds.length;i++){
@@ -164,14 +163,12 @@ function rebuildAll(){
   updateDisplay();
 }
 
-/* ===== 特殊機率 ===== */
-
+/* 特殊機率（完全未改動邏輯） */
 function calculateSpecial(index){
   const gap = lastSpecialIndex===null ? index :
               index-1-lastSpecialIndex;
 
   let weight=1;
-
   [1,3,5,10,14,16,18].forEach(p=>{
     weight+=Math.exp(-((gap-p)**2)/7)*0.75;
   });
@@ -190,8 +187,7 @@ function calculateSpecial(index){
     "歷史間隔："+specialIntervals.slice(-10).reverse().join(" → ");
 }
 
-/* ===== 改良大小預測 ===== */
-
+/* 修正後大小預測 */
 function calculateBigSmall(index){
 
   const history=rounds.slice(0,index-1);
@@ -200,8 +196,7 @@ function calculateBigSmall(index){
   const recent=seq.slice(-6);
   const bigCount=recent.reduce((a,b)=>a+b,0);
   const smallCount=recent.length-bigCount;
-
-  const momentum=(bigCount-smallCount)/recent.length;
+  const momentum=(bigCount-smallCount)/recent.length || 0;
 
   let flips=0;
   for(let i=1;i<recent.length;i++)
@@ -209,30 +204,27 @@ function calculateBigSmall(index){
 
   const flipRate=recent.length>1?flips/(recent.length-1):0;
 
-  /* 保守 */
   let consProb=0.5+momentum*0.25;
   consProb=Math.max(0.15,Math.min(0.85,consProb));
   const cons = consProb>=0.5?"大":"小";
-
   predictionsCons.push(cons);
 
-  /* 高波動 */
   let aggrProb;
-
   if(flipRate>0.55){
-    aggrProb=0.5-momentum*0.35; // 震盪提前反轉
+    aggrProb=0.5-momentum*0.35;
   }else{
-    aggrProb=0.5+momentum*0.45; // 單邊加速
+    aggrProb=0.5+momentum*0.45;
   }
 
   aggrProb=Math.max(0.1,Math.min(0.9,aggrProb));
   const aggr = aggrProb>=0.5?"大":"小";
-
   predictionsAggr.push(aggr);
+
+  rounds[index-1].consProb=consProb;
+  rounds[index-1].aggrProb=aggrProb;
 }
 
-/* ===== 更新畫面 ===== */
-
+/* 顯示 */
 function updateDisplay(){
 
   let resultsC=[],resultsA=[];
@@ -246,10 +238,14 @@ function updateDisplay(){
   document.getElementById("accuracyAggr").innerText=
     calcRate(resultsA).toFixed(1)+"%";
 
-  if(rounds.length){
+  if(rounds.length>=2){
+    const last=rounds[rounds.length-1];
+    const consBig=last.consProb ?? 0.5;
+    const aggrBig=last.aggrProb ?? 0.5;
+
     document.getElementById("bigSmall").innerHTML=
-      `🛡 保守預測：${predictionsCons[predictionsCons.length-1]}<br>
-       🔥 高波動預測：${predictionsAggr[predictionsAggr.length-1]}`;
+      `🛡 保守：大 ${(consBig*100).toFixed(1)}% / 小 ${(100-consBig*100).toFixed(1)}% → ${consBig>=0.5?"大":"小"}<br>
+       🔥 高波動：大 ${(aggrBig*100).toFixed(1)}% / 小 ${(100-aggrBig*100).toFixed(1)}% → ${aggrBig>=0.5?"大":"小"}`;
   }
 
   drawTrend("trendCons",resultsC);
@@ -268,8 +264,6 @@ function updateDisplay(){
 
   drawChart();
 }
-
-/* 工具 */
 
 function drawTrend(id,arr){
   const div=document.getElementById(id);
