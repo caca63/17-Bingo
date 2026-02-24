@@ -29,7 +29,7 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 
 <div class="container">
 
-<h1>三骰專業預測器 3.3 完整版</h1>
+<h1>三骰專業預測器 3.3</h1>
 
 <div class="card">
 <h3>選擇三顆骰子</h3>
@@ -43,7 +43,7 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 <div style="flex:1">
 
 <div class="card">
-<h3>特殊機率（豹子+17+其他模式）</h3>
+<h3>特殊機率（豹子+17）</h3>
 <div id="specialProb" class="prob cold">4.17%</div>
 <div id="gapInfo"></div>
 <div id="gapHistory" class="stat"></div>
@@ -160,6 +160,7 @@ function getGap(){
 /* =======================
    大小結構強度模型
 ======================= */
+
 function analyzeBigSmallTrend(){
   const last10=rounds.slice(-10);
   if(last10.length<6) return 1;
@@ -188,66 +189,74 @@ function analyzeBigSmallTrend(){
 }
 
 /* =======================
-   特殊機率模型（整合多組合）
+   特殊機率模型（含組合判定）
 ======================= */
+
+function checkSpecialComb(last3){
+  // last3: array of 3 round objects
+  // 回傳 true 表示最近三局符合特殊組合，可增加下一局17/豹子權重
+
+  const dice = last3.flatMap(r=>[r.d1,r.d2,r.d3]);
+
+  const countMap=(arr)=>{
+    const map={};
+    arr.forEach(n=>map[n]=(map[n]||0)+1);
+    return Object.values(map).sort((a,b)=>b-a);
+  }
+
+  const combs=[
+    [3,3,3],
+    [3,2,2,2],
+    [3,3,2,1],
+    [2,2,2,2,1]
+  ];
+
+  const vals = countMap(dice);
+  // 3+3+3
+  if(vals[0]===3 && vals[1]===3 && vals[2]===3) return true;
+  // 3+2+2+2
+  if(vals[0]===3 && vals[1]===2 && vals[2]===2 && vals[3]===2) return true;
+  // 3+3+2+1
+  if(vals[0]===3 && vals[1]===3 && vals[2]===2) return true;
+  // 2+2+2+2+1
+  if(vals[0]===2 && vals[1]===2 && vals[2]===2 && vals[3]===2) return true;
+
+  return false;
+}
+
 function calculateSpecial(){
 
-  const gap = getGap();
-  let weight = 1;
+  const gap=getGap();
+  let weight=1;
 
   [1,3,5,10,14,16,18].forEach(p=>{
-    weight += Math.exp(-((gap-p)**2)/7)*0.75;
+    weight+=Math.exp(-((gap-p)**2)/7)*0.75;
   });
 
-  if(gap > 20){
-    weight += 0.45 + (gap-20)*0.035;
+  if(gap>20){
+    weight+=0.45+(gap-20)*0.035;
   }
 
-  if(gap < 3) weight *= 0.75;
+  if(gap<3) weight*=0.75;
 
-  // 取最近3局的9顆骰子
-  const last3 = rounds.slice(-3);
-  if(last3.length === 3){
-    const diceCounts = {};
-    last3.forEach(r=>{
-      [r.d1,r.d2,r.d3].forEach(n=>{
-        diceCounts[n] = (diceCounts[n]||0)+1;
-      });
-    });
-
-    const counts = Object.values(diceCounts);
-
-    // 判斷各特殊組合
-    const tripleCount = counts.filter(v=>v===3).length;
-    const doubleCount = counts.filter(v=>v===2).length;
-
-    // 3同+3同+3同
-    if(tripleCount === 3) weight += 1.5;
-
-    // 3同+2同+2同+2同
-    else if(tripleCount ===1 && doubleCount >=3) weight += 1.3;
-
-    // 3同+3同+2同+1隨機
-    else if(tripleCount===2 && doubleCount>=1) weight += 1.25;
-
-    // 2同+2同+2同+2同+1隨機
-    else if(doubleCount>=4) weight += 1.2;
+  // 新增最近三局9顆骰子特殊組合判定
+  const last3=rounds.slice(-3);
+  if(last3.length===3 && checkSpecialComb(last3)){
+    weight += 0.18; // 可調整加成大小
   }
 
-  weight *= analyzeBigSmallTrend();
+  const recentSpecial=rounds.slice(-6).filter(r=>r.isSpecial).length;
+  if(recentSpecial>=2) weight*=0.8;
 
-  const recentSpecial = rounds.slice(-6).filter(r=>r.isSpecial).length;
-  if(recentSpecial >= 2) weight *= 0.8;
-
-  const recent = specialProbs.slice(-10).map(p=>parseFloat(p));
-  if(recent.length >= 5){
-    const avg = recent.reduce((a,b)=>a+b,0)/recent.length;
-    if(avg>9) weight *= 0.88;
+  const recent=specialProbs.slice(-10).map(p=>parseFloat(p));
+  if(recent.length>=5){
+    const avg=recent.reduce((a,b)=>a+b,0)/recent.length;
+    if(avg>9) weight*=0.88;
   }
 
-  let prob = BASE_SPECIAL * weight;
-  if(prob>0.16) prob = 0.16;
-  if(prob<0.025) prob = 0.025;
+  let prob=BASE_SPECIAL*weight;
+  if(prob>0.16) prob=0.16;
+  if(prob<0.025) prob=0.025;
 
   specialProbs.push((prob*100).toFixed(2));
 
@@ -269,12 +278,16 @@ function calculateSpecial(){
 /* =======================
    大小預測模型
 ======================= */
+
 function calculateBigSmall(){
+
   let score=0;
   const last10=rounds.slice(-10);
 
   if(last10.length>=6){
+
     const seq=last10.map(r=>r.size==="大"?1:0);
+
     let maxRun=1, run=1;
     for(let i=1;i<seq.length;i++){
       if(seq[i]===seq[i-1]){ run++; maxRun=Math.max(maxRun,run); }
@@ -317,7 +330,10 @@ function calculateBigSmall(){
   updateTrendBoxes();
 }
 
-/* ======================= */
+/* =======================
+   通用計算
+======================= */
+
 function calculate(){
   calculateSpecial();
   calculateBigSmall();
