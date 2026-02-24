@@ -2,40 +2,34 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>九骰預測系統 v3.9（完整強化版）</title>
+<title>九骰預測系統 v4.2 穩定優化版</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
 body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 .container{max-width:1300px;margin:auto;padding:20px;}
 .card{background:#1e293b;padding:20px;margin-top:20px;border-radius:12px;}
 .dice-btn{width:50px;height:50px;margin:5px;font-size:18px;border-radius:8px;border:none;cursor:pointer;background:#334155;color:white;}
-.prob{font-size:36px;font-weight:bold;}
-.cold{color:#38bdf8;}
-.warm{color:#facc15;}
-.hot{color:#f87171;}
+.prob{font-size:26px;font-weight:bold;}
 .flex{display:flex;gap:20px;}
-.side{width:280px;}
+.side{width:320px;}
 .trend-box{display:flex;flex-wrap:wrap;gap:3px;margin-top:10px;}
 .win{width:12px;height:12px;background:#22c55e;}
 .lose{width:12px;height:12px;background:#ef4444;}
 .stat{font-size:13px;color:#94a3b8;margin-top:5px;}
 .toggle-btn{margin:5px;padding:4px 8px;background:#334155;border:none;color:white;border-radius:6px;cursor:pointer;}
 .active{background:#22c55e;}
-.heat-good{color:#22c55e;font-weight:bold;}
-.heat-mid{color:#facc15;font-weight:bold;}
-.heat-bad{color:#ef4444;font-weight:bold;}
 </style>
 </head>
 <body>
 
 <div class="container">
-<h1>九骰預測系統 v3.9</h1>
+<h1>九骰預測系統 v4.2</h1>
 
 <div class="card">
 <h3>選擇三顆骰子</h3>
 <div id="diceButtons"></div>
 <div>已選：<span id="selectedDice"></span></div>
-<button onclick="submitRound()">確認新增</button>
+<button onclick="submitRound()">新增</button>
 <button onclick="deleteLast()">刪除上一局</button>
 </div>
 
@@ -44,23 +38,18 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 <div style="flex:1">
 
 <div class="card">
-<h3>特殊機率（豹子+17）</h3>
-<div id="specialProb" class="prob cold">4.17%</div>
-<div id="gapInfo"></div>
+<h3>特殊機率（豹子 + 17）</h3>
+<div id="specialProb" class="prob">4.17%</div>
+<div id="gapInfo" class="stat"></div>
 <div id="gapHistory" class="stat"></div>
 </div>
 
 <div class="card">
 <h3>大小預測</h3>
-<div id="bigSmall"></div>
+<div id="bigSmall" class="prob"></div>
 <div class="stat">
 保守準確率：<span id="accuracyCons">0%</span> |
 高波動準確率：<span id="accuracyAggr">0%</span>
-</div>
-<div class="stat">
-策略熱度：
-<span id="heatCons"></span> |
-<span id="heatAggr"></span>
 </div>
 </div>
 
@@ -72,13 +61,13 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 <button class="toggle-btn active" onclick="setTrend(20)" id="btn20">20</button>
 <button class="toggle-btn" onclick="setTrend(40)" id="btn40">40</button>
 
-<h4>🛡 保守模式</h4>
-<div id="trendBoxesCons" class="trend-box"></div>
-<div class="stat" id="statsCons"></div>
+<h4>🛡 保守</h4>
+<div id="trendCons" class="trend-box"></div>
+<div id="statsCons" class="stat"></div>
 
-<h4>🔥 高波動模式</h4>
-<div id="trendBoxesAggr" class="trend-box"></div>
-<div class="stat" id="statsAggr"></div>
+<h4>🔥 高波動</h4>
+<div id="trendAggr" class="trend-box"></div>
+<div id="statsAggr" class="stat"></div>
 
 </div>
 
@@ -97,32 +86,32 @@ body{background:#0f172a;color:#e5e7eb;font-family:Arial;text-align:center;}
 </div>
 
 <script>
+
 const BASE_SPECIAL=0.0417;
 let rounds=[],selected=[];
 let predictionsCons=[],predictionsAggr=[];
-let correctCons=0,correctAggr=0;
 let specialProbs=[],specialIntervals=[];
 let lastSpecialIndex=null;
 let trendLength=20;
-
 let chart=echarts.init(document.getElementById('chart'));
 
-/* ========================= */
-function createButtons(){
+/* 建立骰子 */
+(function(){
   const c=document.getElementById("diceButtons");
   for(let i=1;i<=6;i++){
     const b=document.createElement("button");
     b.innerText=i;
     b.className="dice-btn";
-    b.onclick=()=>{if(selected.length<3){selected.push(i);updateSel();}};
+    b.onclick=()=>{ if(selected.length<3){ selected.push(i); updateSel(); } };
     c.appendChild(b);
   }
+})();
+
+function updateSel(){
+  document.getElementById("selectedDice").innerText=selected.join(",");
 }
-createButtons();
 
-function updateSel(){document.getElementById("selectedDice").innerText=selected.join(",");}
-
-/* ========================= */
+/* 新增 */
 function submitRound(){
   if(selected.length!==3)return;
 
@@ -133,11 +122,6 @@ function submitRound(){
   const isSpecial=isBao||is17;
   const size=sum>=11?"大":"小";
 
-  if(predictionsCons.length){
-    if(predictionsCons[predictionsCons.length-1]===size)correctCons++;
-    if(predictionsAggr[predictionsAggr.length-1]===size)correctAggr++;
-  }
-
   if(isSpecial){
     if(lastSpecialIndex!==null)
       specialIntervals.push(rounds.length-lastSpecialIndex);
@@ -145,34 +129,49 @@ function submitRound(){
   }
 
   rounds.push({d1,d2,d3,sum,isSpecial,size});
-  selected=[]; updateSel();
-  calculate();
+  selected=[];
+  updateSel();
+  rebuildAll();
 }
 
-/* ========================= */
 function deleteLast(){
-  if(rounds.length===0)return;
-
+  if(!rounds.length)return;
   rounds.pop();
-  predictionsCons.pop();
-  predictionsAggr.pop();
-  specialProbs.pop();
+  rebuildAll();
+}
 
-  correctCons=0; correctAggr=0;
-  for(let i=1;i<rounds.length;i++){
-    if(predictionsCons[i-1]===rounds[i].size)correctCons++;
-    if(predictionsAggr[i-1]===rounds[i].size)correctAggr++;
+/* ===== 核心重建 ===== */
+
+function rebuildAll(){
+  predictionsCons=[];
+  predictionsAggr=[];
+  specialProbs=[];
+  lastSpecialIndex=null;
+
+  for(let i=0;i<rounds.length;i++){
+    if(rounds[i].isSpecial){
+      if(lastSpecialIndex!==null)
+        specialIntervals.push(i-lastSpecialIndex);
+      lastSpecialIndex=i;
+    }
   }
 
-  calculate(true);
+  for(let i=1;i<=rounds.length;i++){
+    calculateSpecial(i);
+    if(i>=2) calculateBigSmall(i);
+  }
+
+  updateDisplay();
 }
 
-/* ========================= */
-function calculateSpecial(){
-  const gap = lastSpecialIndex===null ? rounds.length :
-              rounds.length-1-lastSpecialIndex;
+/* ===== 特殊機率 ===== */
+
+function calculateSpecial(index){
+  const gap = lastSpecialIndex===null ? index :
+              index-1-lastSpecialIndex;
 
   let weight=1;
+
   [1,3,5,10,14,16,18].forEach(p=>{
     weight+=Math.exp(-((gap-p)**2)/7)*0.75;
   });
@@ -185,82 +184,56 @@ function calculateSpecial(){
 
   specialProbs.push((prob*100).toFixed(2));
 
-  document.getElementById("specialProb").innerText=
-    (prob*100).toFixed(2)+"%";
+  document.getElementById("specialProb").innerText=(prob*100).toFixed(2)+"%";
   document.getElementById("gapInfo").innerText="目前間隔："+gap;
   document.getElementById("gapHistory").innerText=
     "歷史間隔："+specialIntervals.slice(-10).reverse().join(" → ");
-
-  drawChart();
 }
 
-/* ========================= */
-function calculateBigSmall(skipPush=false){
+/* ===== 改良大小預測 ===== */
 
-  if(rounds.length<2){
-    document.getElementById("bigSmall").innerText="資料不足";
-    return;
+function calculateBigSmall(index){
+
+  const history=rounds.slice(0,index-1);
+  const seq=history.map(r=>r.size==="大"?1:0);
+
+  const recent=seq.slice(-6);
+  const bigCount=recent.reduce((a,b)=>a+b,0);
+  const smallCount=recent.length-bigCount;
+
+  const momentum=(bigCount-smallCount)/recent.length;
+
+  let flips=0;
+  for(let i=1;i<recent.length;i++)
+    if(recent[i]!==recent[i-1])flips++;
+
+  const flipRate=recent.length>1?flips/(recent.length-1):0;
+
+  /* 保守 */
+  let consProb=0.5+momentum*0.25;
+  consProb=Math.max(0.15,Math.min(0.85,consProb));
+  const cons = consProb>=0.5?"大":"小";
+
+  predictionsCons.push(cons);
+
+  /* 高波動 */
+  let aggrProb;
+
+  if(flipRate>0.55){
+    aggrProb=0.5-momentum*0.35; // 震盪提前反轉
+  }else{
+    aggrProb=0.5+momentum*0.45; // 單邊加速
   }
 
-  const seq=rounds.slice(-10).map(r=>r.size==="大"?1:0);
-  const last=seq[seq.length-1]||0;
+  aggrProb=Math.max(0.1,Math.min(0.9,aggrProb));
+  const aggr = aggrProb>=0.5?"大":"小";
 
-  // flip偵測
-  let flip=0;
-  for(let i=1;i<seq.length;i++)if(seq[i]!==seq[i-1])flip++;
-  let flipRatio=seq.length>1?flip/(seq.length-1):0;
-
-  // 保守
-  let consProb=0.6*last+0.4*0.5;
-  consProb=Math.min(Math.max(consProb,0.1),0.9);
-
-  // 高波動
-  let aggrProb=
-      0.4*(1-flipRatio)*last+
-      0.3*0.5+
-      (0.3+0.3*flipRatio)*(Math.random()<0.5?0:1);
-
-  aggrProb=Math.min(Math.max(aggrProb,0.1),0.9);
-
-  if(!skipPush){
-    predictionsCons.push(consProb>=0.5?"大":"小");
-    predictionsAggr.push(aggrProb>=0.5?"大":"小");
-  }
-
-  document.getElementById("bigSmall").innerHTML=
-  `🛡 保守：大 ${(consProb*100).toFixed(1)}%<br>
-   🔥 高波動：大 ${(aggrProb*100).toFixed(1)}%`;
-
-  updateTrendBoxes();
-  updateHeat();
+  predictionsAggr.push(aggr);
 }
 
-/* ========================= */
-function calcStats(results){
-  const last20=results.slice(-20);
-  const last50=results.slice(-50);
-  const last30=results.slice(-30);
+/* ===== 更新畫面 ===== */
 
-  const r20=last20.length?(last20.filter(x=>x).length/last20.length*100):0;
-  const r50=last50.length?(last50.filter(x=>x).length/last50.length*100):0;
-
-  let trend="➡";
-  if(last30.length===30){
-    const r1=last30.slice(0,15).filter(x=>x).length/15;
-    const r2=last30.slice(15).filter(x=>x).length/15;
-    if(r2-r1>0.03)trend="⬆";
-    else if(r1-r2>0.03)trend="⬇";
-  }
-
-  return {r20,r50,trend};
-}
-
-/* ========================= */
-function updateTrendBoxes(){
-
-  const cDiv=document.getElementById("trendBoxesCons");
-  const aDiv=document.getElementById("trendBoxesAggr");
-  cDiv.innerHTML=""; aDiv.innerHTML="";
+function updateDisplay(){
 
   let resultsC=[],resultsA=[];
   for(let i=1;i<rounds.length;i++){
@@ -268,62 +241,63 @@ function updateTrendBoxes(){
     resultsA.push(predictionsAggr[i-1]===rounds[i].size);
   }
 
-  resultsC.slice(-trendLength).forEach(w=>{
-    const d=document.createElement("div");
-    d.className=w?"win":"lose";
-    cDiv.appendChild(d);
-  });
+  document.getElementById("accuracyCons").innerText=
+    calcRate(resultsC).toFixed(1)+"%";
+  document.getElementById("accuracyAggr").innerText=
+    calcRate(resultsA).toFixed(1)+"%";
 
-  resultsA.slice(-trendLength).forEach(w=>{
-    const d=document.createElement("div");
-    d.className=w?"win":"lose";
-    aDiv.appendChild(d);
-  });
-
-  const statsC=calcStats(resultsC);
-  const statsA=calcStats(resultsA);
-
-  document.getElementById("statsCons").innerText=
-    `20局:${statsC.r20.toFixed(1)}% | 50局:${statsC.r50.toFixed(1)}% | 30趨勢:${statsC.trend}`;
-
-  document.getElementById("statsAggr").innerText=
-    `20局:${statsA.r20.toFixed(1)}% | 50局:${statsA.r50.toFixed(1)}% | 30趨勢:${statsA.trend}`;
-}
-
-/* ========================= */
-function updateHeat(){
-  const accC=predictionsCons.length>1?(correctCons/(predictionsCons.length-1)*100):0;
-  const accA=predictionsAggr.length>1?(correctAggr/(predictionsAggr.length-1)*100):0;
-
-  function heat(rate){
-    if(rate>=55)return '<span class="heat-good">綠燈</span>';
-    if(rate>=48)return '<span class="heat-mid">黃燈</span>';
-    return '<span class="heat-bad">紅燈</span>';
+  if(rounds.length){
+    document.getElementById("bigSmall").innerHTML=
+      `🛡 保守預測：${predictionsCons[predictionsCons.length-1]}<br>
+       🔥 高波動預測：${predictionsAggr[predictionsAggr.length-1]}`;
   }
 
-  document.getElementById("accuracyCons").innerText=accC.toFixed(1)+"%";
-  document.getElementById("accuracyAggr").innerText=accA.toFixed(1)+"%";
-  document.getElementById("heatCons").innerHTML=heat(accC);
-  document.getElementById("heatAggr").innerHTML=heat(accA);
-}
+  drawTrend("trendCons",resultsC);
+  drawTrend("trendAggr",resultsA);
 
-/* ========================= */
-function calculate(skipPush=false){
-  calculateSpecial();
-  calculateBigSmall(skipPush);
+  document.getElementById("statsCons").innerText=
+    `20局:${calcRecent(resultsC,20).toFixed(1)}% | 50局:${calcRecent(resultsC,50).toFixed(1)}%`;
+
+  document.getElementById("statsAggr").innerText=
+    `20局:${calcRecent(resultsA,20).toFixed(1)}% | 50局:${calcRecent(resultsA,50).toFixed(1)}%`;
+
   document.getElementById("history").innerText=
     rounds.slice(-30)
     .map(r=>`${r.d1}${r.d2}${r.d3}${r.isSpecial?'★':''}`)
     .join(" , ");
+
+  drawChart();
 }
 
-/* ========================= */
+/* 工具 */
+
+function drawTrend(id,arr){
+  const div=document.getElementById(id);
+  div.innerHTML="";
+  arr.slice(-trendLength).forEach(w=>{
+    const d=document.createElement("div");
+    d.className=w?"win":"lose";
+    div.appendChild(d);
+  });
+}
+
+function calcRate(arr){
+  if(!arr.length)return 0;
+  return arr.filter(x=>x).length/arr.length*100;
+}
+
+function calcRecent(arr,n){
+  const slice=arr.slice(-n);
+  if(!slice.length)return 0;
+  return slice.filter(x=>x).length/slice.length*100;
+}
+
 function setTrend(n){
   trendLength=n;
   document.getElementById("btn20").classList.remove("active");
   document.getElementById("btn40").classList.remove("active");
   document.getElementById("btn"+n).classList.add("active");
-  updateTrendBoxes();
+  updateDisplay();
 }
 
 function drawChart(){
@@ -333,6 +307,7 @@ function drawChart(){
     series:[{data:specialProbs,type:'line',smooth:true}]
   });
 }
+
 </script>
 </body>
 </html>
